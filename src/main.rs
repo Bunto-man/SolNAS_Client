@@ -26,7 +26,6 @@ struct MoveRequest {
 }
 
 // --- Background Worker Messages ---
-// This is how our background threads talk to the main UI
 enum AppMsg {
     LoginSuccess(String),
     LoginFailed(String),
@@ -61,7 +60,7 @@ struct NasClientApp {
     moving_item: Option<String>,
     move_target_folder: String,
 }
-
+// -- Give Default values to the app to prevent bugs.
 impl Default for NasClientApp {
     fn default() -> Self {
         let (tx, rx) = mpsc::channel();
@@ -82,14 +81,15 @@ impl Default for NasClientApp {
     }
 }
 
-// --- Helper for HTTPS ---
+/// --- Helper for HTTPS ---
+/// ### This function does as it says. It builds a client and ignores the self signed certificates.
 fn get_client() -> reqwest::blocking::Client {
     reqwest::blocking::Client::builder()
         .danger_accept_invalid_certs(true)
         .build()
         .unwrap()
 }
-
+// The method to make the app pretty
 impl eframe::App for NasClientApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // 1. Process any messages from background threads
@@ -134,15 +134,27 @@ impl eframe::App for NasClientApp {
     }
 }
 
+// basically implements the whole entire app. have fun.
 impl NasClientApp {
     // ==========================================
     // UI RENDERING
     // ==========================================
-    
+    /// # Render Login
+    /// 
+    ///  * This function puts each of the buttons and text on the login page.
+    ///  * I tried to make it easy to edit if you want any changes, and it's easy to change things, but its very wordy, I know.
+    /// 
+    /// ### Changing the look of the buttons
+    /// 
+    /// > To change the look of the buttons, edit the "let" expressions.
+    /// * It's simple: size is size of the button, colors are for the fill of the buttons and of the text inside the buttons.
+    /// * Let the rust compiler tell you if you've done something wrong
     fn render_login(&mut self, ui: &mut egui::Ui) {
 
-        let login_title = egui::RichText::new("SolNAS Login").color(egui::Color32::from_hex("#ac5ddc").unwrap()).size(20.0);
-        //let connect_button = egui::Button::new(connect_button_raw).fill(egui::Color32::LIGHT_BLUE);
+        let login_title = egui::RichText::new("SolNAS Login").color(egui::Color32::from_hex("#ac5ddc").unwrap()).size(24.0);
+
+        let connect_button_raw = egui::RichText::new("Connect").color(egui::Color32::BLACK).size(20.0);
+        let connect_button = egui::Button::new(connect_button_raw).fill(egui::Color32::from_hex("#ac5ddc").unwrap());
 
         ui.vertical_centered(|ui| {
             ui.add_space(50.0);
@@ -151,26 +163,31 @@ impl NasClientApp {
         });
 
         ui.vertical_centered(|ui| {
-            ui.label(egui::RichText::new("NAS IP Address:").strong());
-            ui.text_edit_singleline(&mut self.ip_input);
+
+            ui.label(egui::RichText::new("NAS IP Address:").strong().size(24.0));
+
+            ui.add(egui::TextEdit::singleline(&mut self.ip_input) // change the size of the text bar
+            .font(egui::FontId::proportional(24.0))
+        );
             ui.add_space(10.0);
-            ui.label(egui::RichText::new("Password:").strong());
-            ui.add(egui::TextEdit::singleline(&mut self.password_input).password(true));
-        });
+            ui.label(egui::RichText::new("Password:").strong().size(24.0)); 
+
+            ui.add(egui::TextEdit::singleline(&mut self.password_input) // change the size of the text bar
+            .font(egui::FontId::proportional(24.0))
+        );
+        }
+    );
 
         ui.add_space(20.0);
 
-        let connect_button_raw = egui::RichText::new("Connect").color(egui::Color32::BLACK).size(20.0);
-        let connect_button = egui::Button::new(connect_button_raw).fill(egui::Color32::from_hex("#ac5ddc").unwrap());
+        
 
         ui.vertical_centered(|ui| {
             if self.is_loading {
                 ui.spinner();
             } else{
-        // 1. Check if the Enter key was pressed during this frame
-        let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
         
-        // 2. Draw the button and check if it was clicked
+        let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
         let button_clicked = ui.add(connect_button).clicked();
 
         // 3. Trigger the logic if EITHER action happened
@@ -211,13 +228,13 @@ impl NasClientApp {
 
     fn render_dashboard(&mut self, ui: &mut egui::Ui) {
 
-        let back_button_raw = egui::RichText::new("⬅ Path Back").color(egui::Color32::BLACK).size(14.0);
+        let back_button_raw = egui::RichText::new("⬅ Path Back").color(egui::Color32::BLACK).size(20.0);
         let back_button = egui::Button::new(back_button_raw).fill(egui::Color32::from_hex("#ac5ddc").unwrap());
 
-        let upload_button_raw = egui::RichText::new("📤 Upload File").color(egui::Color32::BLACK).size(14.0);
+        let upload_button_raw = egui::RichText::new("📤 Upload File").color(egui::Color32::BLACK).size(20.0);
         let upload_button = egui::Button::new(upload_button_raw).fill(egui::Color32::from_hex("#ac5ddc").unwrap());
 
-        let folder_make_button_raw = egui::RichText::new("📁 Create Folder").color(egui::Color32::BLACK).size(14.0);
+        let folder_make_button_raw = egui::RichText::new("📁 Create Folder").color(egui::Color32::BLACK).size(20.0);
         let folder_make_button = egui::Button::new(folder_make_button_raw).fill(egui::Color32::from_hex("#ac5ddc").unwrap());
 
         let refresh_raw = egui::RichText::new("🔄 Refresh").color(egui::Color32::BLACK).size(16.0);
@@ -257,14 +274,17 @@ impl NasClientApp {
 
             
             if ui.add(upload_button).clicked() {
-                if let Some(path) = rfd::FileDialog::new().pick_file() {
-                    self.upload_file(path);
+                if let Some(path) = rfd::FileDialog::new().pick_files() {
+                    self.upload_files(path);
                 }
             }
             
             ui.separator();
             
-            ui.add(egui::TextEdit::singleline(&mut self.new_folder_name).hint_text("New folder name...").text_color(Color32::from_hex("#ffffff").unwrap()));
+            ui.add(
+                egui::TextEdit::singleline(&mut self.new_folder_name).hint_text("New folder name...").text_color(Color32::WHITE)
+                .font(egui::FontId::proportional(24.0))
+            );
             if ui.add(folder_make_button).clicked() {
                 if !self.new_folder_name.is_empty() {
                     self.create_folder(self.new_folder_name.clone());
@@ -291,15 +311,21 @@ impl NasClientApp {
             for file in self.files.clone() {
                 ui.horizontal(|ui| {
                     if file.is_dir {
-                        ui.label("📁");
-                        ui.label(egui::RichText::new(&file.name).strong());
+
+                        ui.label(egui::RichText::new("📁")
+                        .font(egui::FontId::proportional(24.0))
+                        );
+
+                        ui.label(egui::RichText::new(&file.name).strong()
+                        .font(egui::FontId::proportional(24.0))
+                    );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
 
-                            let folder_delete_button_raw = egui::RichText::new("🗑 delete").color(egui::Color32::BLACK).size(10.0);
+                            let folder_delete_button_raw = egui::RichText::new("🗑 delete").color(egui::Color32::BLACK).size(15.0);
                             let folder_delete_button = egui::Button::new(folder_delete_button_raw).fill(egui::Color32::LIGHT_RED);
 
-                            let folder_open_button_raw = egui::RichText::new("Open Folder").color(egui::Color32::BLACK).size(16.0);
-                            let folder_open_button = egui::Button::new(folder_open_button_raw).fill(egui::Color32::from_hex("#dca55d").unwrap());
+                            let folder_open_button_raw = egui::RichText::new("Open Folder").color(egui::Color32::BLACK).size(24.0);
+                            let folder_open_button = egui::Button::new(folder_open_button_raw).fill(egui::Color32::from_hex("#ac5ddc").unwrap());
 
                             if ui.add(folder_delete_button).clicked() { self.delete_item(&file.name); }
                             ui.add_space(20.0);                        
@@ -313,20 +339,27 @@ impl NasClientApp {
                             }
                         });
                     } else {
-                        ui.label("📄");
-                        ui.label(egui::RichText::new(&file.name).strong());
+                        ui.label(egui::RichText::new("📄")
+                        .font(egui::FontId::proportional(24.0))
+                        );
+
+                        ui.label(
+                            egui::RichText::new(&file.name).strong()
+                            .font(egui::FontId::proportional(24.0))
+                        );
+
                         let mb = file.size as f64 / 1_048_576.0;
                         ui.label(format!("({:.2} MB)", mb));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
 
-                                let file_delete_button_raw = egui::RichText::new("🗑 delete").color(egui::Color32::BLACK).size(10.0);
+                                let file_delete_button_raw = egui::RichText::new("🗑 delete").color(egui::Color32::BLACK).size(15.0);
                                 let file_delete_button = egui::Button::new(file_delete_button_raw).fill(egui::Color32::LIGHT_RED);
 
-                                let file_move_raw = egui::RichText::new("Move").color(egui::Color32::BLACK).size(16.0);
+                                let file_move_raw = egui::RichText::new("Move").color(egui::Color32::BLACK).size(24.0);
                                 let file_move_button = egui::Button::new(file_move_raw).fill(egui::Color32::LIGHT_GREEN);
 
-                                let file_download_raw = egui::RichText::new("⬇ Download").color(egui::Color32::BLACK).size(16.0);
-                                let file_download_button = egui::Button::new(file_download_raw).fill(egui::Color32::from_hex("#5d8abc").unwrap());
+                                let file_download_raw = egui::RichText::new("⬇ Download").color(egui::Color32::BLACK).size(24.0);
+                                let file_download_button = egui::Button::new(file_download_raw).fill(egui::Color32::from_hex("#ac5ddc").unwrap());
 
                             if ui.add(file_delete_button).clicked() { self.delete_item(&file.name); }
                             ui.add_space(20.0);
@@ -352,13 +385,55 @@ impl NasClientApp {
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                 .show(ui.ctx(), |ui| {
-                    
+
                     ui.label(format!("Moving: {}", item_name));
                     ui.add_space(10.0);
                     
-                    ui.label("Enter destination folder (leave blank to move to root):");
-                    ui.text_edit_singleline(&mut self.move_target_folder);
-                    ui.add_space(10.0);
+                    ui.label("Select destination:");
+                    
+                    // --- THE NEW DROPDOWN MENU ---
+                    egui::ComboBox::from_id_source("move_dropdown")
+                        // Display the currently selected target (or "Root" if it's empty)
+                        .selected_text(if self.move_target_folder.is_empty() { 
+                            "Root (/)".to_string() 
+                        } else { 
+                            format!("/{}", self.move_target_folder) 
+                        })
+                        .width(250.0)
+                        .show_ui(ui, |ui| {
+                            // 1. Always offer the Root folder
+                            ui.selectable_value(&mut self.move_target_folder, String::new(), "Root (/)");
+                            
+                            // 2. Offer the Parent folder (if we are currently inside a folder)
+                            if !self.current_path.is_empty() {
+                                let mut parts: Vec<&str> = self.current_path.split('/').collect();
+                                parts.pop(); // Go up one level
+                                let parent_path = parts.join("/");
+                                
+                                let display_name = if parent_path.is_empty() { 
+                                    "Root (/)".to_string() 
+                                } else { 
+                                    format!("/{}", parent_path) 
+                                };
+                                
+                                ui.selectable_value(&mut self.move_target_folder, parent_path, format!("⬆ Parent ({})", display_name));
+                            }
+
+                            // 3. Offer any Subfolders visible on the current screen
+                            for f in &self.files {
+                                if f.is_dir && f.name != item_name { // Don't allow moving a folder inside itself!
+                                    let target_path = if self.current_path.is_empty() {
+                                        f.name.clone()
+                                    } else {
+                                        format!("{}/{}", self.current_path, f.name)
+                                    };
+                                    ui.selectable_value(&mut self.move_target_folder, target_path.clone(), format!("📁 /{}", target_path));
+                                }
+                            }
+                        });
+                    // -----------------------------
+
+                    ui.add_space(15.0);
 
                     ui.horizontal(|ui| {
                         if ui.button("Confirm Move").clicked() {
@@ -370,10 +445,10 @@ impl NasClientApp {
                                 format!("{}/{}", self.current_path, item_name)
                             };
 
-                            // Fire the network thread
+                            // Fire the network thread using your existing function!
                             self.move_item(source, self.move_target_folder.clone(), item_name);
                             
-                            // Close the modal
+                            // Close the modal and reset
                             self.moving_item = None;
                             self.move_target_folder.clear();
                         }
@@ -384,9 +459,8 @@ impl NasClientApp {
                         }
                     });
                 });
-        }
     }
-
+}
     // ==========================================
     // API NETWORK COMMANDS
     // ==========================================
@@ -412,39 +486,47 @@ impl NasClientApp {
         });
     }
 
-    fn upload_file(&mut self, file_path: PathBuf) {
+   fn upload_files(&mut self, file_paths: Vec<PathBuf>) {
         self.is_loading = true;
-        self.status_message = "Uploading...".into();
+        self.status_message = format!("Uploading {} file(s)...", file_paths.len());
         let tx = self.tx.clone();
         let ip = self.ip_input.clone();
         let token = self.token.clone();
         let current_path = self.current_path.clone();
 
         thread::spawn(move || {
-            let filename = file_path.file_name().unwrap().to_str().unwrap().to_string();
-            // Spoof the filename to include the folder path!
-            let target_name = if current_path.is_empty() { 
-                filename 
-            } else { 
-                format!("{}/{}", current_path, filename) 
-            };
-
             let client = get_client();
             let url = format!("https://{}:8080/api/upload", ip);
             
-            // THE FIX: Create the part from the real file, then override its filename
-            let file_part = match reqwest::blocking::multipart::Part::file(&file_path) {
-                Ok(part) => part.file_name(target_name),
-                Err(e) => {
-                    let _ = tx.send(AppMsg::Error(format!("Could not read file: {}", e)));
-                    return;
-                }
-            };
+            // 1. Initialize the empty multipart form
+            let mut form = reqwest::blocking::multipart::Form::new();
 
-            // Attach that single, perfect part to the form
-            let form = reqwest::blocking::multipart::Form::new()
-                .part("files", file_part);
+            // 2. Loop through every file the user selected
+            for file_path in file_paths {
+                let filename = file_path.file_name().unwrap().to_str().unwrap().to_string();
+                
+                let target_name = if current_path.is_empty() { 
+                    filename 
+                } else { 
+                    format!("{}/{}", current_path, filename) 
+                };
 
+                // 3. Create the part and override its filename
+                match reqwest::blocking::multipart::Part::file(&file_path) {
+                    Ok(part) => {
+                        let file_part = part.file_name(target_name);
+                        // Attach the part to the form. We use the key "files" 
+                        // because that is what your Axum backend is looking for!
+                        form = form.part("files", file_part);
+                    },
+                    Err(e) => {
+                        let _ = tx.send(AppMsg::Error(format!("Could not read file: {}", e)));
+                        return; // Abort if a file can't be read
+                    }
+                };
+            }
+
+            // 4. Send the massive form containing all the files at once
             match client.post(&url).bearer_auth(token).multipart(form).send() {
                 Ok(_) => tx.send(AppMsg::ActionSuccess("Upload complete!".into())).unwrap(),
                 Err(e) => tx.send(AppMsg::Error(format!("Upload failed: {}", e))).unwrap(),
@@ -562,8 +644,8 @@ fn save_config(ip: &str) {
 fn main() {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([800.0, 600.0])
-            .with_title("SolNAS")
+            .with_inner_size([1000.0, 900.0])
+            .with_title("SolNAS Client App")
             .with_transparent(true), //allow transparency
         ..Default::default()
     };
