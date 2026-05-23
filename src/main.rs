@@ -1,6 +1,7 @@
 use eframe::egui;
+use egui::Color32;
 use serde::{Deserialize, Serialize};
-use std::{fs, thread, path::PathBuf};
+use std::{thread, path::PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 
 const CONFIG_FILE: &str = "config.ini";
@@ -10,7 +11,7 @@ const CONFIG_FILE: &str = "config.ini";
 struct AuthRequest { password: String }
 
 #[derive(Deserialize)]
-struct AuthResponse { token: Option<String>, message: Option<String> }
+struct AuthResponse { token: Option<String>}
 
 #[derive(Deserialize, Clone)]
 struct FileInfo { name: String, size: u64, is_dir: bool }
@@ -92,6 +93,15 @@ fn get_client() -> reqwest::blocking::Client {
 impl eframe::App for NasClientApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // 1. Process any messages from background threads
+
+        let mut style = (*ctx.style()).clone();
+
+        style.spacing.item_spacing = egui::vec2(15.0, 15.0);
+        style.visuals.widgets.noninteractive.rounding = egui::Rounding::same(8.0);
+        style.visuals.widgets.inactive.rounding = egui::Rounding::same(8.0);
+
+        ctx.set_style(style); //actualy save the changes
+
         while let Ok(msg) = self.rx.try_recv() {
             self.is_loading = false;
             match msg {
@@ -110,9 +120,12 @@ impl eframe::App for NasClientApp {
                 AppMsg::Error(err) => self.status_message = err,
             }
         }
+        let custom_frame = egui::Frame::default()
+        .fill(egui::Color32::from_hex("#1e052e").unwrap()) 
+        .inner_margin(20.0);
 
-        // 2. Draw the appropriate screen
-        egui::CentralPanel::default().show(ctx, |ui| {
+        // Draw the screen
+        egui::CentralPanel::default().frame(custom_frame).show(ctx, |ui| {
             match self.view {
                 ViewState::Login => self.render_login(ui),
                 ViewState::Dashboard => self.render_dashboard(ui),
@@ -127,52 +140,68 @@ impl NasClientApp {
     // ==========================================
     
     fn render_login(&mut self, ui: &mut egui::Ui) {
+
+        let login_title = egui::RichText::new("SolNAS Login").color(egui::Color32::from_hex("#ac5ddc").unwrap()).size(20.0);
+        //let connect_button = egui::Button::new(connect_button_raw).fill(egui::Color32::LIGHT_BLUE);
+
         ui.vertical_centered(|ui| {
             ui.add_space(50.0);
-            ui.heading("SolNAS Login");
+            ui.heading(login_title);
             ui.add_space(20.0);
         });
 
         ui.vertical_centered(|ui| {
-            ui.label("NAS IP Address:");
+            ui.label(egui::RichText::new("NAS IP Address:").strong());
             ui.text_edit_singleline(&mut self.ip_input);
             ui.add_space(10.0);
-            ui.label("Password:");
+            ui.label(egui::RichText::new("Password:").strong());
             ui.add(egui::TextEdit::singleline(&mut self.password_input).password(true));
         });
 
         ui.add_space(20.0);
+
+        let connect_button_raw = egui::RichText::new("Connect").color(egui::Color32::BLACK).size(20.0);
+        let connect_button = egui::Button::new(connect_button_raw).fill(egui::Color32::from_hex("#ac5ddc").unwrap());
+
         ui.vertical_centered(|ui| {
             if self.is_loading {
                 ui.spinner();
-            } else if ui.button("Connect").clicked() {
-                self.is_loading = true;
-                save_config(self.ip_input.trim());
-                
-                let ip = self.ip_input.trim().to_string();
-                let pwd = self.password_input.clone();
-                let tx = self.tx.clone();
+            } else{
+        // 1. Check if the Enter key was pressed during this frame
+        let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
+        
+        // 2. Draw the button and check if it was clicked
+        let button_clicked = ui.add(connect_button).clicked();
 
-                thread::spawn(move || {
-                    let client = get_client();
-                    let url = format!("https://{}:8080/api/auth", ip);
-                    let payload = AuthRequest { password: pwd };
-                    
-                    match client.post(&url).json(&payload).send() {
-                        Ok(res) => {
-                            if res.status().is_success() {
-                                if let Ok(data) = res.json::<AuthResponse>() {
-                                    tx.send(AppMsg::LoginSuccess(data.token.unwrap_or_default())).unwrap();
-                                }
-                            } else {
-                                tx.send(AppMsg::LoginFailed("Invalid password".to_string())).unwrap();
+        // 3. Trigger the logic if EITHER action happened
+        if button_clicked || enter_pressed {
+            self.is_loading = true;
+            save_config(self.ip_input.trim());
+            let ip = self.ip_input.trim().to_string();
+            let pwd = self.password_input.clone();
+            let tx = self.tx.clone();
+
+            thread::spawn(move || {
+                let client = get_client();
+                let url = format!("https://{}:8080/api/auth", ip);
+                let payload = AuthRequest { password: pwd };
+                
+                match client.post(&url).json(&payload).send() {
+                    Ok(res) => {
+                        if res.status().is_success() {
+                            if let Ok(data) = res.json::<AuthResponse>() {
+                                tx.send(AppMsg::LoginSuccess(data.token.unwrap_or_default())).unwrap();
                             }
+                        } else {
+                            tx.send(AppMsg::LoginFailed("Invalid password".to_string())).unwrap();
                         }
-                        Err(_) => tx.send(AppMsg::LoginFailed("Network error".to_string())).unwrap(),
                     }
-                });
-            }
-        });
+                    Err(_) => tx.send(AppMsg::LoginFailed("Network error ( Is the server running? )".to_string())).unwrap(),
+                }
+            });
+        }
+    }
+});
 
         if !self.status_message.is_empty() {
             ui.add_space(10.0);
@@ -181,16 +210,31 @@ impl NasClientApp {
     }
 
     fn render_dashboard(&mut self, ui: &mut egui::Ui) {
+
+        let back_button_raw = egui::RichText::new("⬅ Path Back").color(egui::Color32::BLACK).size(14.0);
+        let back_button = egui::Button::new(back_button_raw).fill(egui::Color32::from_hex("#ac5ddc").unwrap());
+
+        let upload_button_raw = egui::RichText::new("📤 Upload File").color(egui::Color32::BLACK).size(14.0);
+        let upload_button = egui::Button::new(upload_button_raw).fill(egui::Color32::from_hex("#ac5ddc").unwrap());
+
+        let folder_make_button_raw = egui::RichText::new("📁 Create Folder").color(egui::Color32::BLACK).size(14.0);
+        let folder_make_button = egui::Button::new(folder_make_button_raw).fill(egui::Color32::from_hex("#ac5ddc").unwrap());
+
+        let refresh_raw = egui::RichText::new("🔄 Refresh").color(egui::Color32::BLACK).size(16.0);
+        let refresh_button = egui::Button::new(refresh_raw).fill(egui::Color32::from_hex("#ac5ddc").unwrap());
+
+        let logout_raw = egui::RichText::new("Log Out").color(egui::Color32::BLACK).size(14.0);
+        let logout_button = egui::Button::new(logout_raw).fill(egui::Color32::from_hex("#ac5ddc").unwrap());
         // Top Navigation Bar
         ui.horizontal(|ui| {
-            if ui.button("Log Out").clicked() {
+            if ui.add(logout_button).clicked() {
                 self.token.clear();
                 self.view = ViewState::Login;
             }
             ui.separator();
             
             if !self.current_path.is_empty() {
-                if ui.button("⬅ Back").clicked() {
+                if ui.add(back_button).clicked() {
                     let mut parts: Vec<&str> = self.current_path.split('/').collect();
                     parts.pop();
                     self.current_path = parts.join("/");
@@ -200,7 +244,7 @@ impl NasClientApp {
             ui.label(egui::RichText::new(format!("/{}", self.current_path)).strong());
             
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("🔄 Refresh").clicked() {
+                if ui.add(refresh_button).clicked() {
                     self.refresh_files();
                 }
             });
@@ -210,7 +254,9 @@ impl NasClientApp {
 
         // Toolbar (Upload & Create Folder)
         ui.horizontal(|ui| {
-            if ui.button("📤 Upload File Here").clicked() {
+
+            
+            if ui.add(upload_button).clicked() {
                 if let Some(path) = rfd::FileDialog::new().pick_file() {
                     self.upload_file(path);
                 }
@@ -218,8 +264,8 @@ impl NasClientApp {
             
             ui.separator();
             
-            ui.add(egui::TextEdit::singleline(&mut self.new_folder_name).hint_text("New folder name..."));
-            if ui.button("📁 Create Folder").clicked() {
+            ui.add(egui::TextEdit::singleline(&mut self.new_folder_name).hint_text("New folder name...").text_color(Color32::from_hex("#ffffff").unwrap()));
+            if ui.add(folder_make_button).clicked() {
                 if !self.new_folder_name.is_empty() {
                     self.create_folder(self.new_folder_name.clone());
                     self.new_folder_name.clear();
@@ -231,17 +277,14 @@ impl NasClientApp {
 
         // System Status / Errors
         if !self.status_message.is_empty() {
-            ui.label(egui::RichText::new(&self.status_message).color(egui::Color32::from_rgb(0, 150, 0)));
+            ui.label(egui::RichText::new(&self.status_message).color(egui::Color32::from_hex("#ac5ddc").unwrap()));
             ui.separator();
         }
 
         if self.is_loading {
             ui.spinner();
         }
-        //try to create custom buttons that look nicer
-    let delete_button_raw = egui::RichText::new("🗑 Delete").color(egui::Color32::WHITE).size(16.0);
-    let delete_button = egui::Button::new(delete_button_raw).fill(egui::Color32::DARK_RED);
-    //I can't seem to understand...
+        
 
         // File List Area
         egui::ScrollArea::vertical().show(ui, |ui| {
@@ -251,8 +294,16 @@ impl NasClientApp {
                         ui.label("📁");
                         ui.label(egui::RichText::new(&file.name).strong());
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button("🗑").clicked() { self.delete_item(&file.name); }
-                            if ui.button("Open").clicked() {
+
+                            let folder_delete_button_raw = egui::RichText::new("🗑 delete").color(egui::Color32::BLACK).size(10.0);
+                            let folder_delete_button = egui::Button::new(folder_delete_button_raw).fill(egui::Color32::LIGHT_RED);
+
+                            let folder_open_button_raw = egui::RichText::new("Open Folder").color(egui::Color32::BLACK).size(16.0);
+                            let folder_open_button = egui::Button::new(folder_open_button_raw).fill(egui::Color32::from_hex("#dca55d").unwrap());
+
+                            if ui.add(folder_delete_button).clicked() { self.delete_item(&file.name); }
+                            ui.add_space(20.0);                        
+                            if ui.add(folder_open_button).clicked() {
                                 if self.current_path.is_empty() {
                                     self.current_path = file.name.clone();
                                 } else {
@@ -263,21 +314,30 @@ impl NasClientApp {
                         });
                     } else {
                         ui.label("📄");
-                        ui.label(&file.name);
+                        ui.label(egui::RichText::new(&file.name).strong());
                         let mb = file.size as f64 / 1_048_576.0;
                         ui.label(format!("({:.2} MB)", mb));
-                        
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button("🗑").clicked() { self.delete_item(&file.name); }
+
+                                let file_delete_button_raw = egui::RichText::new("🗑 delete").color(egui::Color32::BLACK).size(10.0);
+                                let file_delete_button = egui::Button::new(file_delete_button_raw).fill(egui::Color32::LIGHT_RED);
+
+                                let file_move_raw = egui::RichText::new("Move").color(egui::Color32::BLACK).size(16.0);
+                                let file_move_button = egui::Button::new(file_move_raw).fill(egui::Color32::LIGHT_GREEN);
+
+                                let file_download_raw = egui::RichText::new("⬇ Download").color(egui::Color32::BLACK).size(16.0);
+                                let file_download_button = egui::Button::new(file_download_raw).fill(egui::Color32::from_hex("#5d8abc").unwrap());
+
+                            if ui.add(file_delete_button).clicked() { self.delete_item(&file.name); }
                             ui.add_space(20.0);
-                            if ui.button("⬇ Download").clicked() {
+                            if ui.add(file_download_button).clicked() {
                                 // Prompt user for where to save the file!
                                 if let Some(save_path) = rfd::FileDialog::new().set_file_name(&file.name).save_file() {
                                     self.download_file(&file.name, save_path);
                                 }
                             }
                             // For Files:
-                        if ui.button("Move").clicked() {
+                        if ui.add(file_move_button).clicked() {
                             self.moving_item = Some(file.name.clone());
                             }
                         });
@@ -502,8 +562,9 @@ fn save_config(ip: &str) {
 fn main() {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([800.0, 600.0]) // Made it slightly wider for the file layout
-            .with_title("SolNAS Client"),
+            .with_inner_size([800.0, 600.0])
+            .with_title("SolNAS")
+            .with_transparent(true), //allow transparency
         ..Default::default()
     };
 
