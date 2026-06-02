@@ -12,3 +12,4 @@ serde_json = "1.0"
 
 reqwest = { version = "0.12", features = ["json", "blocking", "rustls-tls","multipart"] }
 rfd = "0.14"
+image = "0.24"

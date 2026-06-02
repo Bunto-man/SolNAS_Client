@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] //this gets rid of the terminal popup
+//use 
 use eframe::egui;
 use egui::Color32;
 use serde::{Deserialize, Serialize};
@@ -32,7 +34,16 @@ enum AppMsg {
     FilesLoaded(Vec<FileInfo>),
     ActionSuccess(String), // Used for upload/delete/create success
     Error(String),
+
+    ImageLoaded(String, egui::ColorImage), 
+    ImageFailed(String),
 }
+enum ImageState {
+    Loading,
+    Loaded(egui::TextureHandle), // The actual GPU texture egui uses
+    Failed,
+}
+
 
 #[derive(PartialEq)]
 enum ViewState { Login, Dashboard }
@@ -59,6 +70,9 @@ struct NasClientApp {
 
     moving_item: Option<String>,
     move_target_folder: String,
+
+    item_pending_deletion: Option<String>, //new
+    image_cache: std::collections::HashMap<String, ImageState>,
 }
 // -- Give Default values to the app to prevent bugs.
 impl Default for NasClientApp {
@@ -77,6 +91,8 @@ impl Default for NasClientApp {
             is_loading: false,
             moving_item: None,
             move_target_folder: String::new(),
+            item_pending_deletion: None, //new
+            image_cache: std::collections::HashMap::new(),
         }
     }
 }
@@ -118,6 +134,19 @@ impl eframe::App for NasClientApp {
                     self.refresh_files(); // Auto-refresh the folder view!
                 }
                 AppMsg::Error(err) => self.status_message = err,
+                AppMsg::ImageLoaded(name, color_image) => {
+                    // Send the pixels to the graphics card
+                    let texture = ctx.load_texture(
+                        &name, 
+                        color_image, 
+                        egui::TextureOptions::LINEAR // Makes scaled-down thumbnails look smooth
+                    );
+                    self.image_cache.insert(name, ImageState::Loaded(texture));
+                }
+                AppMsg::ImageFailed(name) => {
+                    self.image_cache.insert(name, ImageState::Failed);
+                }
+
             }
         }
         let custom_frame = egui::Frame::default()
@@ -327,7 +356,23 @@ impl NasClientApp {
                             let folder_open_button_raw = egui::RichText::new("Open Folder").color(egui::Color32::BLACK).size(24.0);
                             let folder_open_button = egui::Button::new(folder_open_button_raw).fill(egui::Color32::from_hex("#ac5ddc").unwrap());
 
-                            if ui.add(folder_delete_button).clicked() { self.delete_item(&file.name); }
+                            if ui.add(folder_delete_button).clicked() {
+                                //improved delete logic
+
+                                if self.item_pending_deletion.as_deref() == Some(&file.name) {
+                                    // SECOND CLICK: Execute the actual delete function
+                                    self.delete_item(&file.name);
+        
+                                    // Clear the state and the message
+                                    self.item_pending_deletion = None; 
+                                    self.status_message = String::new(); 
+                                }else{
+                                    // FIRST CLICK: Queue it up and show the system message
+                                    self.item_pending_deletion = Some(file.name.clone());
+                                    self.status_message = format!("Delete '{}'? Click 🗑 again to confirm.", &file.name);
+                                }
+                                }
+
                             ui.add_space(20.0);                        
                             if ui.add(folder_open_button).clicked() {
                                 if self.current_path.is_empty() {
@@ -338,10 +383,36 @@ impl NasClientApp {
                                 self.refresh_files();
                             }
                         });
-                    } else {
-                        ui.label(egui::RichText::new("📄")
-                        .font(egui::FontId::proportional(24.0))
-                        );
+                    } else { //get a preview of the pic
+                            let lower_name = file.name.to_lowercase();
+                            let is_image = lower_name.ends_with(".png") || lower_name.ends_with(".jpg") || lower_name.ends_with(".jpeg");
+
+                            if is_image {
+                                // Check our cache
+                                match self.image_cache.get(&file.name) {
+                                    Some(ImageState::Loaded(texture)) => {
+                                        // Draw the thumbnail! (Restricted to 32x32 pixels, with slightly rounded corners)
+                                        ui.add(egui::Image::new(texture).max_width(64.0).max_height(64.0).rounding(4.0));
+                                    }
+                                    Some(ImageState::Loading) => {
+                                        ui.spinner(); // Show a loading wheel while it downloads
+                                    }
+                                    Some(ImageState::Failed) => {
+                                        ui.label("📄"); // Fallback to emoji if it broke
+                                    }
+                                    None => {
+                                        // We haven't asked for this image yet! Queue it up and show a spinner for now.
+                                        self.fetch_preview(file.name.clone());
+                                        ui.spinner();
+                                    }
+                                }
+                            } 
+                            else {
+                                // Standard file icon for PDFs, TXTs, etc.
+                                ui.label(egui::RichText::new("📄")
+                                .font(egui::FontId::proportional(24.0))
+                                );
+                            }
 
                         ui.label(
                             egui::RichText::new(&file.name).strong()
@@ -361,7 +432,21 @@ impl NasClientApp {
                                 let file_download_raw = egui::RichText::new("⬇ Download").color(egui::Color32::BLACK).size(24.0);
                                 let file_download_button = egui::Button::new(file_download_raw).fill(egui::Color32::from_hex("#ac5ddc").unwrap());
 
-                            if ui.add(file_delete_button).clicked() { self.delete_item(&file.name); }
+                            if ui.add(file_delete_button).clicked() {
+                                //file deletion improved logic
+                                if self.item_pending_deletion.as_deref() == Some(&file.name) {
+                                    // SECOND CLICK: Execute the actual delete function
+                                    self.delete_item(&file.name);
+        
+                                    // Clear the state and the message
+                                    self.item_pending_deletion = None; 
+                                    self.status_message = String::new(); 
+                                }else{
+                                    // FIRST CLICK: Queue it up and show the system message
+                                    self.item_pending_deletion = Some(file.name.clone());
+                                    self.status_message = format!("Delete '{}'? Click 🗑 again to confirm.", &file.name);
+                                }
+                                }
                             ui.add_space(20.0);
                             if ui.add(file_download_button).clicked() {
                                 // Prompt user for where to save the file!
@@ -557,7 +642,47 @@ impl NasClientApp {
             }
         });
     }
+    fn fetch_preview(&mut self, filename: String) {
+        // Mark it as loading so we don't spawn 100 threads for the same image
+        self.image_cache.insert(filename.clone(), ImageState::Loading);
+        
+        let tx = self.tx.clone();
+        let ip = self.ip_input.clone();
+        let token = self.token.clone();
+        
+        let full_path = if self.current_path.is_empty() { 
+            filename.clone() 
+        } else { 
+            format!("{}/{}", self.current_path, filename) 
+        };
 
+        thread::spawn(move || {
+            let client = get_client();
+            let url = format!("https://{}:8080/api/download/{}?preview=true", ip, full_path);
+            
+            if let Ok(res) = client.get(&url).bearer_auth(token).send() {
+                if let Ok(bytes) = res.bytes() {
+                    // Decode the raw web bytes into a dynamic image
+                    if let Ok(img) = image::load_from_memory(&bytes) {
+                        let size = [img.width() as _, img.height() as _];
+                        let image_buffer = img.to_rgba8();
+                        let pixels = image_buffer.as_flat_samples();
+                        
+                        // Convert to egui's specific color format
+                        let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                            size,
+                            pixels.as_slice(),
+                        );
+                        
+                        tx.send(AppMsg::ImageLoaded(filename, color_image)).unwrap();
+                        return;
+                    }
+                }
+            }
+            // If anything fails (network error, bad image file), mark it as failed
+            tx.send(AppMsg::ImageFailed(filename)).unwrap();
+        });
+    }
     fn create_folder(&mut self, folder_name: String) {
         self.is_loading = true;
         let tx = self.tx.clone();
