@@ -603,7 +603,7 @@ impl NasClientApp {
             let client = get_client();
             let url = format!("https://{}:8080/api/upload_chunk", ip);
             
-            const CHUNK_SIZE: u64 = 10 * 1024 * 1024; // 10 Megabytes per chunk
+            const CHUNK_SIZE: u64 = 100 * 1024 * 1024; // 100 Megabytes per chunk
 
             for file_path in file_paths {
                 let filename = file_path.file_name().unwrap().to_str().unwrap().to_string();
@@ -625,6 +625,8 @@ impl NasClientApp {
                 for chunk_index in 0..total_chunks {
                     // Determine how big this specific chunk should be (the last chunk is usually smaller than 10MB)
                     let current_chunk_size = std::cmp::min(CHUNK_SIZE, file_size - (chunk_index * CHUNK_SIZE));
+                    let offset = chunk_index * CHUNK_SIZE;
+
                     let mut buffer = vec![0; current_chunk_size as usize];
                     
                     if let Err(e) = file.read_exact(&mut buffer) {
@@ -645,6 +647,7 @@ impl NasClientApp {
                             .text("filename", target_name.clone())
                             .text("chunk_index", chunk_index.to_string())
                             .text("total_chunks", total_chunks.to_string())
+                            .text("offset", offset.to_string())
                             .part("file", part);
 
                         match client.post(&url).bearer_auth(&token).multipart(form).send() {
