@@ -3,8 +3,10 @@
 use eframe::egui;
 use egui::Color32;
 use serde::{Deserialize, Serialize};
-use std::{thread, path::PathBuf};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::{thread, path::PathBuf,
+    sync::mpsc::{self, Receiver, Sender},
+    io::Read
+};
 
 const CONFIG_FILE: &str = "config.ini";
 
@@ -34,6 +36,7 @@ enum AppMsg {
     FilesLoaded(Vec<FileInfo>),
     ActionSuccess(String), // Used for upload/delete/create success
     Error(String),
+    UploadProgress(f32), //for the upload status
 
     ImageLoaded(String, egui::ColorImage), 
     ImageFailed(String),
@@ -73,6 +76,8 @@ struct NasClientApp {
 
     item_pending_deletion: Option<String>, //new
     image_cache: std::collections::HashMap<String, ImageState>,
+
+    upload_progress: Option<f32>,
 }
 // -- Give Default values to the app to prevent bugs.
 impl Default for NasClientApp {
@@ -93,6 +98,7 @@ impl Default for NasClientApp {
             move_target_folder: String::new(),
             item_pending_deletion: None, //new
             image_cache: std::collections::HashMap::new(),
+            upload_progress: None, //don't forget the defaults.
         }
     }
 }
@@ -145,6 +151,9 @@ impl eframe::App for NasClientApp {
                 }
                 AppMsg::ImageFailed(name) => {
                     self.image_cache.insert(name, ImageState::Failed);
+                }
+                AppMsg::UploadProgress(pct) => {
+                    self.upload_progress = Some(pct);
                 }
 
             }
@@ -321,7 +330,16 @@ impl NasClientApp {
                 }
             }
         });
-
+        if let Some(progress) = self.upload_progress {
+            ui.add_space(5.0);
+            
+            ui.add(egui::ProgressBar::new(progress)
+                .show_percentage()
+                .animate(true)
+            );
+            ui.add_space(5.0);
+            
+        }
         ui.separator();
 
         // System Status / Errors
@@ -573,7 +591,9 @@ impl NasClientApp {
 
    fn upload_files(&mut self, file_paths: Vec<PathBuf>) {
         self.is_loading = true;
+        self.upload_progress = Some(0.0);
         self.status_message = format!("Uploading {} file(s)...", file_paths.len());
+        
         let tx = self.tx.clone();
         let ip = self.ip_input.clone();
         let token = self.token.clone();
@@ -581,41 +601,74 @@ impl NasClientApp {
 
         thread::spawn(move || {
             let client = get_client();
-            let url = format!("https://{}:8080/api/upload", ip);
+            let url = format!("https://{}:8080/api/upload_chunk", ip);
             
-            // 1. Initialize the empty multipart form
-            let mut form = reqwest::blocking::multipart::Form::new();
+            const CHUNK_SIZE: u64 = 10 * 1024 * 1024; // 10 Megabytes per chunk
 
-            // 2. Loop through every file the user selected
             for file_path in file_paths {
                 let filename = file_path.file_name().unwrap().to_str().unwrap().to_string();
-                
-                let target_name = if current_path.is_empty() { 
-                    filename 
-                } else { 
-                    format!("{}/{}", current_path, filename) 
-                };
+                let target_name = if current_path.is_empty() { filename } else { format!("{}/{}", current_path, filename) };
 
-                // 3. Create the part and override its filename
-                match reqwest::blocking::multipart::Part::file(&file_path) {
-                    Ok(part) => {
-                        let file_part = part.file_name(target_name);
-                        // Attach the part to the form. We use the key "files" 
-                        // because that is what your Axum backend is looking for!
-                        form = form.part("files", file_part);
-                    },
+                let mut file = match std::fs::File::open(&file_path) {
+                    Ok(f) => f,
                     Err(e) => {
-                        let _ = tx.send(AppMsg::Error(format!("Could not read file: {}", e)));
-                        return; // Abort if a file can't be read
+                        let _ = tx.send(AppMsg::Error(format!("Could not read local file: {}", e)));
+                        continue;
                     }
                 };
+
+                let file_size = file.metadata().unwrap().len();
+                
+                // Edge case: Uploading a completely empty file (0 bytes)
+                let total_chunks = if file_size == 0 { 1 } else { (file_size as f64 / CHUNK_SIZE as f64).ceil() as u64 };
+
+                for chunk_index in 0..total_chunks {
+                    // Determine how big this specific chunk should be (the last chunk is usually smaller than 10MB)
+                    let current_chunk_size = std::cmp::min(CHUNK_SIZE, file_size - (chunk_index * CHUNK_SIZE));
+                    let mut buffer = vec![0; current_chunk_size as usize];
+                    
+                    if let Err(e) = file.read_exact(&mut buffer) {
+                        let _ = tx.send(AppMsg::Error(format!("Failed to read local chunk: {}", e)));
+                        break;
+                    }
+
+                    // RETRY LOOP: Try to send the chunk up to 3 times if the network drops
+                    let mut attempts = 0;
+                    let mut success = false;
+                    
+                    while attempts < 3 && !success {
+                        // We must rebuild the form for every attempt because reqwest consumes it
+                        let part = reqwest::blocking::multipart::Part::bytes(buffer.clone())
+                            .file_name(target_name.clone());
+
+                        let form = reqwest::blocking::multipart::Form::new()
+                            .text("filename", target_name.clone())
+                            .text("chunk_index", chunk_index.to_string())
+                            .text("total_chunks", total_chunks.to_string())
+                            .part("file", part);
+
+                        match client.post(&url).bearer_auth(&token).multipart(form).send() {
+                            Ok(res) if res.status().is_success() => success = true,
+                            _ => {
+                                attempts += 1;
+                                std::thread::sleep(std::time::Duration::from_secs(2)); // Wait 2s before retry
+                            }
+                        }
+                    }
+
+                    if !success {
+                        let _ = tx.send(AppMsg::Error(format!("Upload failed after 3 retries: {}", target_name)));
+                        return; // Completely abort the thread
+                    }
+
+                    // Calculate total percentage and update UI!
+                    let percentage = (chunk_index as f32 + 1.0) / total_chunks as f32;
+                    let _ = tx.send(AppMsg::UploadProgress(percentage));
+                }
             }
 
-            // 4. Send the massive form containing all the files at once
-            match client.post(&url).bearer_auth(token).multipart(form).send() {
-                Ok(_) => tx.send(AppMsg::ActionSuccess("Upload complete!".into())).unwrap(),
-                Err(e) => tx.send(AppMsg::Error(format!("Upload failed: {}", e))).unwrap(),
-            }
+            // All files finished!
+            let _ = tx.send(AppMsg::ActionSuccess("Upload complete!".into()));
         });
     }
 
