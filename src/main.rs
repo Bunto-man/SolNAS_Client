@@ -29,6 +29,26 @@ struct MoveRequest {
     destination_path: String,
 }
 
+#[derive(Clone, Copy)]
+struct AppTheme {
+    background: egui::Color32,
+    text_primary: egui::Color32,
+    text_dashboard: egui::Color32,
+    text_title: egui::Color32,
+    download_btn: egui::Color32,
+    upload_btn: egui::Color32,
+    delete_btn: egui::Color32,
+    move_btn: egui::Color32,
+    logout_btn: egui::Color32,
+    connect_btn: egui::Color32,
+    open_btn: egui::Color32,
+    refresh_btn: egui::Color32,
+    path_btn: egui::Color32,
+    folder_btn: egui::Color32,
+
+}//add onto these as you need to.
+
+const STYLE_FILE: &str = "style.ini";
 // --- Background Worker Messages ---
 enum AppMsg {
     LoginSuccess(String),
@@ -78,12 +98,15 @@ struct NasClientApp {
     image_cache: std::collections::HashMap<String, ImageState>,
 
     upload_progress: Option<f32>,
+
+    theme: AppTheme,
 }
 // -- Give Default values to the app to prevent bugs.
 impl Default for NasClientApp {
     fn default() -> Self {
         let (tx, rx) = mpsc::channel();
         Self {
+            theme: load_theme(), // Load it exactly once when the app starts
             view: ViewState::Login,
             tx, rx,
             ip_input: load_config(),
@@ -99,6 +122,7 @@ impl Default for NasClientApp {
             item_pending_deletion: None, //new
             image_cache: std::collections::HashMap::new(),
             upload_progress: None, //don't forget the defaults.
+            
         }
     }
 }
@@ -159,7 +183,7 @@ impl eframe::App for NasClientApp {
             }
         }
         let custom_frame = egui::Frame::default()
-        .fill(egui::Color32::from_hex("#1e052e").unwrap()) 
+        .fill(self.theme.background) 
         .inner_margin(20.0);
 
         // Draw the screen
@@ -189,10 +213,10 @@ impl NasClientApp {
     /// * Let the rust compiler tell you if you've done something wrong
     fn render_login(&mut self, ui: &mut egui::Ui) {
 
-        let login_title = egui::RichText::new("SolNAS Login").color(egui::Color32::from_hex("#ac5ddc").unwrap()).size(24.0);
+        let login_title = egui::RichText::new("SolNAS Login").color(self.theme.text_title).size(24.0); //start replacing
 
-        let connect_button_raw = egui::RichText::new("Connect").color(egui::Color32::BLACK).size(20.0);
-        let connect_button = egui::Button::new(connect_button_raw).fill(egui::Color32::from_hex("#ac5ddc").unwrap());
+        let connect_button_raw = egui::RichText::new("Connect").color(self.theme.text_primary).size(20.0);
+        let connect_button = egui::Button::new(connect_button_raw).fill(self.theme.connect_btn);
 
         ui.vertical_centered(|ui| {
             ui.add_space(50.0);
@@ -260,26 +284,26 @@ impl NasClientApp {
 
         if !self.status_message.is_empty() {
             ui.add_space(10.0);
-            ui.label(egui::RichText::new(&self.status_message).color(egui::Color32::BLUE));
+            ui.label(egui::RichText::new(&self.status_message).color(egui::Color32::BLACK));
         }
     }
 
     fn render_dashboard(&mut self, ui: &mut egui::Ui) {
 
-        let back_button_raw = egui::RichText::new("⬅ Path Back").color(egui::Color32::BLACK).size(20.0);
-        let back_button = egui::Button::new(back_button_raw).fill(egui::Color32::from_hex("#ac5ddc").unwrap());
+        let back_button_raw = egui::RichText::new("⬅ Path Back").color(self.theme.text_dashboard).size(20.0);
+        let back_button = egui::Button::new(back_button_raw).fill(self.theme.path_btn);
 
-        let upload_button_raw = egui::RichText::new("📤 Upload File").color(egui::Color32::BLACK).size(20.0);
-        let upload_button = egui::Button::new(upload_button_raw).fill(egui::Color32::from_hex("#ac5ddc").unwrap());
+        let upload_button_raw = egui::RichText::new("📤 Upload File").color(self.theme.text_dashboard).size(20.0);
+        let upload_button = egui::Button::new(upload_button_raw).fill(self.theme.upload_btn);
 
-        let folder_make_button_raw = egui::RichText::new("📁 Create Folder").color(egui::Color32::BLACK).size(20.0);
-        let folder_make_button = egui::Button::new(folder_make_button_raw).fill(egui::Color32::from_hex("#ac5ddc").unwrap());
+        let folder_make_button_raw = egui::RichText::new("📁 Create Folder").color(self.theme.text_dashboard).size(20.0);
+        let folder_make_button = egui::Button::new(folder_make_button_raw).fill(self.theme.folder_btn);
 
-        let refresh_raw = egui::RichText::new("🔄 Refresh").color(egui::Color32::BLACK).size(16.0);
+        let refresh_raw = egui::RichText::new("🔄 Refresh").color(self.theme.text_dashboard).size(16.0);
         let refresh_button = egui::Button::new(refresh_raw).fill(egui::Color32::from_hex("#ac5ddc").unwrap());
 
-        let logout_raw = egui::RichText::new("Log Out").color(egui::Color32::BLACK).size(14.0);
-        let logout_button = egui::Button::new(logout_raw).fill(egui::Color32::from_hex("#ac5ddc").unwrap());
+        let logout_raw = egui::RichText::new("Log Out").color(self.theme.text_dashboard).size(14.0);
+        let logout_button = egui::Button::new(logout_raw).fill(self.theme.logout_btn);
         // Top Navigation Bar
         ui.horizontal(|ui| {
             if ui.add(logout_button).clicked() {
@@ -344,7 +368,7 @@ impl NasClientApp {
 
         // System Status / Errors
         if !self.status_message.is_empty() {
-            ui.label(egui::RichText::new(&self.status_message).color(egui::Color32::from_hex("#ac5ddc").unwrap()));
+            ui.label(egui::RichText::new(&self.status_message).color(self.theme.text_dashboard));
             ui.separator();
         }
 
@@ -368,11 +392,11 @@ impl NasClientApp {
                     );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
 
-                            let folder_delete_button_raw = egui::RichText::new("🗑 delete").color(egui::Color32::BLACK).size(15.0);
-                            let folder_delete_button = egui::Button::new(folder_delete_button_raw).fill(egui::Color32::LIGHT_RED);
+                            let folder_delete_button_raw = egui::RichText::new("🗑 delete").color(self.theme.text_primary).size(15.0);
+                            let folder_delete_button = egui::Button::new(folder_delete_button_raw).fill(self.theme.delete_btn);
 
-                            let folder_open_button_raw = egui::RichText::new("Open Folder").color(egui::Color32::BLACK).size(24.0);
-                            let folder_open_button = egui::Button::new(folder_open_button_raw).fill(egui::Color32::from_hex("#ac5ddc").unwrap());
+                            let folder_open_button_raw = egui::RichText::new("Open Folder").color(self.theme.text_primary).size(24.0);
+                            let folder_open_button = egui::Button::new(folder_open_button_raw).fill(self.theme.open_btn);
 
                             if ui.add(folder_delete_button).clicked() {
                                 //improved delete logic
@@ -441,14 +465,14 @@ impl NasClientApp {
                         ui.label(format!("({:.2} MB)", mb));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
 
-                                let file_delete_button_raw = egui::RichText::new("🗑 delete").color(egui::Color32::BLACK).size(15.0);
-                                let file_delete_button = egui::Button::new(file_delete_button_raw).fill(egui::Color32::LIGHT_RED);
+                                let file_delete_button_raw = egui::RichText::new("🗑 delete").color(self.theme.text_primary).size(15.0);
+                                let file_delete_button = egui::Button::new(file_delete_button_raw).fill(self.theme.delete_btn);
 
-                                let file_move_raw = egui::RichText::new("Move").color(egui::Color32::BLACK).size(24.0);
-                                let file_move_button = egui::Button::new(file_move_raw).fill(egui::Color32::LIGHT_GREEN);
+                                let file_move_raw = egui::RichText::new("Move").color(self.theme.text_primary).size(24.0);
+                                let file_move_button = egui::Button::new(file_move_raw).fill(self.theme.move_btn);
 
-                                let file_download_raw = egui::RichText::new("⬇ Download").color(egui::Color32::BLACK).size(24.0);
-                                let file_download_button = egui::Button::new(file_download_raw).fill(egui::Color32::from_hex("#ac5ddc").unwrap());
+                                let file_download_raw = egui::RichText::new("⬇ Download").color(self.theme.text_primary).size(24.0);
+                                let file_download_button = egui::Button::new(file_download_raw).fill(self.theme.download_btn);
 
                             if ui.add(file_delete_button).clicked() {
                                 //file deletion improved logic
@@ -836,4 +860,87 @@ fn main() {
         options,
         Box::new(|_cc| Box::new(NasClientApp::default()) as Box<dyn eframe::App>),
     );
+}
+
+// The Style Update
+///# Parse Hex
+///The Hex Parser for the Color
+fn parse_hex(hex: &str, fallback: egui::Color32) -> egui::Color32 {
+    let clean_hex = hex.trim();
+    egui::Color32::from_hex(clean_hex).unwrap_or(fallback)
+}
+
+fn load_theme() -> AppTheme {
+    // Define your hardcoded default fallback colors here
+    let mut theme = AppTheme {
+        background: egui::Color32::from_hex("#00251d").unwrap(), // Dark Navy
+        text_primary: egui::Color32::BLACK,
+        text_dashboard: egui::Color32::WHITE,
+        text_title: egui::Color32::from_hex("#2de7f5").unwrap(),
+        download_btn: egui::Color32::from_hex("#2de7f5").unwrap(), 
+        upload_btn: egui::Color32::from_hex("#ac5ddc").unwrap(),
+        delete_btn: egui::Color32::from_hex("#dc3545").unwrap(),
+        move_btn: egui::Color32::from_hex("#f07d12").unwrap(),
+        logout_btn: egui::Color32::from_hex("#ac5ddc").unwrap(),
+        connect_btn: egui::Color32::from_hex("#23f534").unwrap(),
+        open_btn: egui::Color32::from_hex("#ac5ddc").unwrap(),
+        refresh_btn: egui::Color32::from_hex("#ac5ddc").unwrap(),
+        path_btn: egui::Color32::from_hex("#5ddcab").unwrap(),
+        folder_btn: egui::Color32::from_hex("#ac5ddc").unwrap(),
+    };
+
+    if !std::path::Path::new(STYLE_FILE).exists() {
+        println!("Style file not found. Creating {}...", STYLE_FILE);
+        let default_ini = "[Colors]\n\
+                           Background = #00251d\n\
+                           Text_Primary = #000000\n\
+                           Text_dashboard = #FFFFFF\n\
+                           text_title = #2de7f5\n\
+                           Download_Button = #28a792\n\
+                           upload_btn = #ac5ddc\n\
+                           Delete_Button = #dc3545\n\
+                           move_btn = #f07d12\n\
+                           logout_btn = #ac5ddc\n\
+                           connect_btn = #23f534\n\
+                           open_btn = #ac5ddc\n\
+                           refresh_btn = #ac5ddc\n\
+                           path_btn = #5ddcab\n\
+                           folder_button = #ac5ddc";
+        let _ = std::fs::write(STYLE_FILE, default_ini);
+        return theme; // Return the defaults since we just created the file
+    }
+
+    // Read the file and parse the custom colors
+    if let Ok(content) = std::fs::read_to_string(STYLE_FILE) {
+        for line in content.lines() {
+            if line.trim().starts_with('#') || line.trim().starts_with('[') {
+                continue; // Skip comments and section headers
+            }
+
+            let parts: Vec<&str> = line.split('=').collect();
+            if parts.len() == 2 {
+                let key = parts[0].trim().to_lowercase();
+                let hex_val = parts[1].trim();
+
+                match key.as_str() {
+                    "background" => theme.background = parse_hex(hex_val, theme.background),
+                    "text_primary" => theme.text_primary = parse_hex(hex_val, theme.text_primary),
+                    "text_dashboard" => theme.text_dashboard = parse_hex(hex_val, theme.text_dashboard),
+                    "text_title" => theme.text_title = parse_hex(hex_val, theme.text_title),
+                    "download_button" => theme.download_btn = parse_hex(hex_val, theme.download_btn),
+                    "upload_button" => theme.upload_btn = parse_hex(hex_val, theme.upload_btn),
+                    "delete_button" => theme.delete_btn = parse_hex(hex_val, theme.delete_btn),
+                    "move_button" => theme.move_btn = parse_hex(hex_val, theme.move_btn),
+                    "logout_button" => theme.logout_btn = parse_hex(hex_val, theme.logout_btn),
+                    "connect_button" => theme.connect_btn = parse_hex(hex_val, theme.connect_btn),
+                    "open_button" => theme.open_btn = parse_hex(hex_val, theme.open_btn),
+                    "refresh_button" => theme.refresh_btn = parse_hex(hex_val, theme.refresh_btn),
+                    "path_button" => theme.path_btn = parse_hex(hex_val, theme.path_btn),
+                    _ => {} // Ignore unknown keys
+                }
+            }
+        }
+    }
+    
+    theme
 }
