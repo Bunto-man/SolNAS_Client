@@ -1,27 +1,42 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] //this gets rid of the terminal popup
-//use 
+//use
 use eframe::egui;
-use egui::Color32;
+use egui::{
+    Color32,
+    //ProgressBar
+};
 use serde::{Deserialize, Serialize};
-use std::{thread, path::PathBuf,
+use std::{
+    io::Read,
+    path::PathBuf,
     sync::mpsc::{self, Receiver, Sender},
-    io::Read
+    thread,
 };
 
 const CONFIG_FILE: &str = "config.ini";
 
 // --- Data Structures ---
 #[derive(Serialize)]
-struct AuthRequest { password: String }
+struct AuthRequest {
+    password: String,
+}
 
 #[derive(Deserialize)]
-struct AuthResponse { token: Option<String>}
+struct AuthResponse {
+    token: Option<String>,
+}
 
 #[derive(Deserialize, Clone)]
-struct FileInfo { name: String, size: u64, is_dir: bool }
+struct FileInfo {
+    name: String,
+    size: u64,
+    is_dir: bool,
+}
 
 #[derive(Deserialize)]
-struct ListResponse { files: Vec<FileInfo> }
+struct ListResponse {
+    files: Vec<FileInfo>,
+}
 
 #[derive(Serialize)]
 struct MoveRequest {
@@ -45,8 +60,7 @@ struct AppTheme {
     refresh_btn: egui::Color32,
     path_btn: egui::Color32,
     folder_btn: egui::Color32,
-
-}//add onto these as you need to.
+} //add onto these as you need to.
 
 const STYLE_FILE: &str = "style.ini";
 // --- Background Worker Messages ---
@@ -58,7 +72,7 @@ enum AppMsg {
     Error(String),
     UploadProgress(f32), //for the upload status
 
-    ImageLoaded(String, egui::ColorImage), 
+    ImageLoaded(String, egui::ColorImage),
     ImageFailed(String),
 }
 enum ImageState {
@@ -67,26 +81,28 @@ enum ImageState {
     Failed,
 }
 
-
 #[derive(PartialEq)]
-enum ViewState { Login, Dashboard }
+enum ViewState {
+    Login,
+    Dashboard,
+}
 
 // --- The Main App State ---
 struct NasClientApp {
     view: ViewState,
     tx: Sender<AppMsg>,
     rx: Receiver<AppMsg>,
-    
+
     // Login Data
     ip_input: String,
     password_input: String,
-    
+
     // Dashboard Data
     token: String,
     current_path: String,
     files: Vec<FileInfo>,
     new_folder_name: String,
-    
+
     // UI States
     status_message: String,
     is_loading: bool,
@@ -108,7 +124,8 @@ impl Default for NasClientApp {
         Self {
             theme: load_theme(), // Load it exactly once when the app starts
             view: ViewState::Login,
-            tx, rx,
+            tx,
+            rx,
             ip_input: load_config(),
             password_input: String::new(),
             token: String::new(),
@@ -122,7 +139,6 @@ impl Default for NasClientApp {
             item_pending_deletion: None, //new
             image_cache: std::collections::HashMap::new(),
             upload_progress: None, //don't forget the defaults.
-            
         }
     }
 }
@@ -161,15 +177,23 @@ impl eframe::App for NasClientApp {
                 AppMsg::FilesLoaded(file_list) => self.files = file_list,
                 AppMsg::ActionSuccess(msg) => {
                     self.status_message = msg;
-                    self.refresh_files(); // Auto-refresh the folder view!
+                    self.is_loading = false;
+
+                    self.upload_progress = None; //this is new!
+
+                    self.refresh_files();
                 }
-                AppMsg::Error(err) => self.status_message = err,
+                AppMsg::Error(err) => {
+                    self.status_message = err;
+                    self.is_loading = false; //sets the loading state
+                    self.upload_progress = None; //this kills the upload bar
+                }
                 AppMsg::ImageLoaded(name, color_image) => {
                     // Send the pixels to the graphics card
                     let texture = ctx.load_texture(
-                        &name, 
-                        color_image, 
-                        egui::TextureOptions::LINEAR // Makes scaled-down thumbnails look smooth
+                        &name,
+                        color_image,
+                        egui::TextureOptions::LINEAR, // Makes scaled-down thumbnails look smooth
                     );
                     self.image_cache.insert(name, ImageState::Loaded(texture));
                 }
@@ -179,20 +203,19 @@ impl eframe::App for NasClientApp {
                 AppMsg::UploadProgress(pct) => {
                     self.upload_progress = Some(pct);
                 }
-
             }
         }
         let custom_frame = egui::Frame::default()
-        .fill(self.theme.background) 
-        .inner_margin(20.0);
+            .fill(self.theme.background)
+            .inner_margin(20.0);
 
         // Draw the screen
-        egui::CentralPanel::default().frame(custom_frame).show(ctx, |ui| {
-            match self.view {
+        egui::CentralPanel::default()
+            .frame(custom_frame)
+            .show(ctx, |ui| match self.view {
                 ViewState::Login => self.render_login(ui),
                 ViewState::Dashboard => self.render_dashboard(ui),
-            }
-        });
+            });
     }
 }
 
@@ -202,20 +225,25 @@ impl NasClientApp {
     // UI RENDERING
     // ==========================================
     /// # Render Login
-    /// 
+    ///
     ///  * This function puts each of the buttons and text on the login page.
     ///  * I tried to make it easy to edit if you want any changes, and it's easy to change things, but its very wordy, I know.
-    /// 
+    ///
     /// ### Changing the look of the buttons
-    /// 
+    ///
     /// > To change the look of the buttons, edit the "let" expressions.
     /// * It's simple: size is size of the button, colors are for the fill of the buttons and of the text inside the buttons.
     /// * Let the rust compiler tell you if you've done something wrong
+    ///
+    /// **As of the style update, all of the special colors can be edited from the style.ini file.**
     fn render_login(&mut self, ui: &mut egui::Ui) {
+        let login_title = egui::RichText::new("SolNAS Login")
+            .color(self.theme.text_title)
+            .size(24.0); //start replacing
 
-        let login_title = egui::RichText::new("SolNAS Login").color(self.theme.text_title).size(24.0); //start replacing
-
-        let connect_button_raw = egui::RichText::new("Connect").color(self.theme.text_primary).size(20.0);
+        let connect_button_raw = egui::RichText::new("Connect")
+            .color(self.theme.text_primary)
+            .size(20.0);
         let connect_button = egui::Button::new(connect_button_raw).fill(self.theme.connect_btn);
 
         ui.vertical_centered(|ui| {
@@ -225,62 +253,67 @@ impl NasClientApp {
         });
 
         ui.vertical_centered(|ui| {
-
             ui.label(egui::RichText::new("NAS IP Address:").strong().size(24.0));
 
-            ui.add(egui::TextEdit::singleline(&mut self.ip_input) // change the size of the text bar
-            .font(egui::FontId::proportional(24.0))
-        );
+            ui.add(
+                egui::TextEdit::singleline(&mut self.ip_input) // change the size of the text bar
+                    .font(egui::FontId::proportional(24.0)),
+            );
             ui.add_space(10.0);
-            ui.label(egui::RichText::new("Password:").strong().size(24.0)); 
+            ui.label(egui::RichText::new("Password:").strong().size(24.0));
 
-            ui.add(egui::TextEdit::singleline(&mut self.password_input) // change the size of the text bar
-            .font(egui::FontId::proportional(24.0))
-        );
-        }
-    );
+            ui.add(
+                egui::TextEdit::singleline(&mut self.password_input) // change the size of the text bar
+                    .font(egui::FontId::proportional(24.0)),
+            );
+        });
 
         ui.add_space(20.0);
-
-        
 
         ui.vertical_centered(|ui| {
             if self.is_loading {
                 ui.spinner();
-            } else{
-        
-        let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
-        let button_clicked = ui.add(connect_button).clicked();
+            } else {
+                let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                let button_clicked = ui.add(connect_button).clicked();
 
-        // 3. Trigger the logic if EITHER action happened
-        if button_clicked || enter_pressed {
-            self.is_loading = true;
-            save_config(self.ip_input.trim());
-            let ip = self.ip_input.trim().to_string();
-            let pwd = self.password_input.clone();
-            let tx = self.tx.clone();
+                // 3. Trigger the logic if EITHER action happened
+                if button_clicked || enter_pressed {
+                    self.is_loading = true;
+                    save_config(self.ip_input.trim());
+                    let ip = self.ip_input.trim().to_string();
+                    let pwd = self.password_input.clone();
+                    let tx = self.tx.clone();
 
-            thread::spawn(move || {
-                let client = get_client();
-                let url = format!("https://{}:8080/api/auth", ip);
-                let payload = AuthRequest { password: pwd };
-                
-                match client.post(&url).json(&payload).send() {
-                    Ok(res) => {
-                        if res.status().is_success() {
-                            if let Ok(data) = res.json::<AuthResponse>() {
-                                tx.send(AppMsg::LoginSuccess(data.token.unwrap_or_default())).unwrap();
+                    thread::spawn(move || {
+                        let client = get_client();
+                        let url = format!("https://{}:8080/api/auth", ip);
+                        let payload = AuthRequest { password: pwd };
+
+                        match client.post(&url).json(&payload).send() {
+                            Ok(res) => {
+                                if res.status().is_success() {
+                                    if let Ok(data) = res.json::<AuthResponse>() {
+                                        tx.send(AppMsg::LoginSuccess(
+                                            data.token.unwrap_or_default(),
+                                        ))
+                                        .unwrap();
+                                    }
+                                } else {
+                                    tx.send(AppMsg::LoginFailed("Invalid password".to_string()))
+                                        .unwrap();
+                                }
                             }
-                        } else {
-                            tx.send(AppMsg::LoginFailed("Invalid password".to_string())).unwrap();
+                            Err(_) => tx
+                                .send(AppMsg::LoginFailed(
+                                    "Network error ( Is the server running? )".to_string(),
+                                ))
+                                .unwrap(),
                         }
-                    }
-                    Err(_) => tx.send(AppMsg::LoginFailed("Network error ( Is the server running? )".to_string())).unwrap(),
+                    });
                 }
-            });
-        }
-    }
-});
+            }
+        });
 
         if !self.status_message.is_empty() {
             ui.add_space(10.0);
@@ -289,20 +322,30 @@ impl NasClientApp {
     }
 
     fn render_dashboard(&mut self, ui: &mut egui::Ui) {
-
-        let back_button_raw = egui::RichText::new("⬅ Path Back").color(self.theme.text_dashboard).size(20.0);
+        let back_button_raw = egui::RichText::new("⬅ Path Back")
+            .color(self.theme.text_dashboard)
+            .size(20.0);
         let back_button = egui::Button::new(back_button_raw).fill(self.theme.path_btn);
 
-        let upload_button_raw = egui::RichText::new("📤 Upload File").color(self.theme.text_dashboard).size(20.0);
+        let upload_button_raw = egui::RichText::new("📤 Upload File")
+            .color(self.theme.text_dashboard)
+            .size(20.0);
         let upload_button = egui::Button::new(upload_button_raw).fill(self.theme.upload_btn);
 
-        let folder_make_button_raw = egui::RichText::new("📁 Create Folder").color(self.theme.text_dashboard).size(20.0);
-        let folder_make_button = egui::Button::new(folder_make_button_raw).fill(self.theme.folder_btn);
+        let folder_make_button_raw = egui::RichText::new("📁 Create Folder")
+            .color(self.theme.text_dashboard)
+            .size(20.0);
+        let folder_make_button =
+            egui::Button::new(folder_make_button_raw).fill(self.theme.folder_btn);
 
-        let refresh_raw = egui::RichText::new("🔄 Refresh").color(self.theme.text_dashboard).size(16.0);
-        let refresh_button = egui::Button::new(refresh_raw).fill(egui::Color32::from_hex("#ac5ddc").unwrap());
+        let refresh_raw = egui::RichText::new("🔄 Refresh")
+            .color(self.theme.text_dashboard)
+            .size(16.0);
+        let refresh_button = egui::Button::new(refresh_raw).fill(self.theme.folder_btn);
 
-        let logout_raw = egui::RichText::new("Log Out").color(self.theme.text_dashboard).size(14.0);
+        let logout_raw = egui::RichText::new("Log Out")
+            .color(self.theme.text_dashboard)
+            .size(14.0);
         let logout_button = egui::Button::new(logout_raw).fill(self.theme.logout_btn);
         // Top Navigation Bar
         ui.horizontal(|ui| {
@@ -311,7 +354,7 @@ impl NasClientApp {
                 self.view = ViewState::Login;
             }
             ui.separator();
-            
+
             if !self.current_path.is_empty() {
                 if ui.add(back_button).clicked() {
                     let mut parts: Vec<&str> = self.current_path.split('/').collect();
@@ -321,7 +364,7 @@ impl NasClientApp {
                 }
             }
             ui.label(egui::RichText::new(format!("/{}", self.current_path)).strong());
-            
+
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.add(refresh_button).clicked() {
                     self.refresh_files();
@@ -333,19 +376,19 @@ impl NasClientApp {
 
         // Toolbar (Upload & Create Folder)
         ui.horizontal(|ui| {
-
-            
             if ui.add(upload_button).clicked() {
                 if let Some(path) = rfd::FileDialog::new().pick_files() {
                     self.upload_files(path);
                 }
             }
-            
+
             ui.separator();
-            
+
             ui.add(
-                egui::TextEdit::singleline(&mut self.new_folder_name).hint_text("New folder name...").text_color(Color32::WHITE)
-                .font(egui::FontId::proportional(24.0))
+                egui::TextEdit::singleline(&mut self.new_folder_name)
+                    .hint_text("New folder name...")
+                    .text_color(Color32::WHITE)
+                    .font(egui::FontId::proportional(24.0)),
             );
             if ui.add(folder_make_button).clicked() {
                 if !self.new_folder_name.is_empty() {
@@ -354,15 +397,16 @@ impl NasClientApp {
                 }
             }
         });
+
         if let Some(progress) = self.upload_progress {
             ui.add_space(5.0);
-            
-            ui.add(egui::ProgressBar::new(progress)
-                .show_percentage()
-                .animate(true)
+
+            ui.add(
+                egui::ProgressBar::new(progress)
+                    .show_percentage()
+                    .animate(true),
             );
             ui.add_space(5.0);
-            
         }
         ui.separator();
 
@@ -375,28 +419,36 @@ impl NasClientApp {
         if self.is_loading {
             ui.spinner();
         }
-        
 
         // File List Area
         egui::ScrollArea::vertical().show(ui, |ui| {
             for file in self.files.clone() {
                 ui.horizontal(|ui| {
                     if file.is_dir {
+                        ui.label(egui::RichText::new("📁").font(egui::FontId::proportional(24.0)));
 
-                        ui.label(egui::RichText::new("📁")
-                        .font(egui::FontId::proportional(24.0))
+                        ui.label(
+                            egui::RichText::new(&file.name)
+                                .strong()
+                                .font(egui::FontId::proportional(24.0)),
                         );
-
-                        ui.label(egui::RichText::new(&file.name).strong()
-                        .font(egui::FontId::proportional(24.0))
-                    );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let folder_delete_button_raw = egui::RichText::new("🗑 delete")
+                                .color(self.theme.text_primary)
+                                .size(15.0);
+                            let folder_delete_button = egui::Button::new(folder_delete_button_raw)
+                                .fill(self.theme.delete_btn);
 
-                            let folder_delete_button_raw = egui::RichText::new("🗑 delete").color(self.theme.text_primary).size(15.0);
-                            let folder_delete_button = egui::Button::new(folder_delete_button_raw).fill(self.theme.delete_btn);
-
-                            let folder_open_button_raw = egui::RichText::new("Open Folder").color(self.theme.text_primary).size(24.0);
-                            let folder_open_button = egui::Button::new(folder_open_button_raw).fill(self.theme.open_btn);
+                            let folder_open_button_raw = egui::RichText::new("Open Folder")
+                                .color(self.theme.text_primary)
+                                .size(24.0);
+                            let folder_open_button =
+                                egui::Button::new(folder_open_button_raw).fill(self.theme.open_btn);
+                            let folder_move_button_raw = egui::RichText::new("Move")
+                                .color(self.theme.text_primary)
+                                .size(24.0);
+                            let folder_move_button =
+                                egui::Button::new(folder_move_button_raw).fill(self.theme.move_btn);
 
                             if ui.add(folder_delete_button).clicked() {
                                 //improved delete logic
@@ -404,101 +456,130 @@ impl NasClientApp {
                                 if self.item_pending_deletion.as_deref() == Some(&file.name) {
                                     // SECOND CLICK: Execute the actual delete function
                                     self.delete_item(&file.name);
-        
+
                                     // Clear the state and the message
-                                    self.item_pending_deletion = None; 
-                                    self.status_message = String::new(); 
-                                }else{
+                                    self.item_pending_deletion = None;
+                                    self.status_message = String::new();
+                                } else {
                                     // FIRST CLICK: Queue it up and show the system message
                                     self.item_pending_deletion = Some(file.name.clone());
-                                    self.status_message = format!("Delete '{}'? Click 🗑 again to confirm.", &file.name);
+                                    self.status_message = format!(
+                                        "Delete '{}'? Click 🗑 again to confirm.",
+                                        &file.name
+                                    );
                                 }
-                                }
+                            }
 
-                            ui.add_space(20.0);                        
+                            ui.add_space(20.0);
                             if ui.add(folder_open_button).clicked() {
                                 if self.current_path.is_empty() {
                                     self.current_path = file.name.clone();
                                 } else {
-                                    self.current_path = format!("{}/{}", self.current_path, file.name);
+                                    self.current_path =
+                                        format!("{}/{}", self.current_path, file.name);
                                 }
                                 self.refresh_files();
                             }
-                        });
-                    } else { //get a preview of the pic
-                            let lower_name = file.name.to_lowercase();
-                            let is_image = lower_name.ends_with(".png") || lower_name.ends_with(".jpg") || lower_name.ends_with(".jpeg");
-
-                            if is_image {
-                                // Check our cache
-                                match self.image_cache.get(&file.name) {
-                                    Some(ImageState::Loaded(texture)) => {
-                                        // Draw the thumbnail! (Restricted to 32x32 pixels, with slightly rounded corners)
-                                        ui.add(egui::Image::new(texture).max_width(64.0).max_height(64.0).rounding(4.0));
-                                    }
-                                    Some(ImageState::Loading) => {
-                                        ui.spinner(); // Show a loading wheel while it downloads
-                                    }
-                                    Some(ImageState::Failed) => {
-                                        ui.label("📄"); // Fallback to emoji if it broke
-                                    }
-                                    None => {
-                                        // We haven't asked for this image yet! Queue it up and show a spinner for now.
-                                        self.fetch_preview(file.name.clone());
-                                        ui.spinner();
-                                    }
-                                }
-                            } 
-                            else {
-                                // Standard file icon for PDFs, TXTs, etc.
-                                ui.label(egui::RichText::new("📄")
-                                .font(egui::FontId::proportional(24.0))
-                                );
+                            ui.add_space(20.0);
+                            if ui.add(folder_move_button).clicked() {
+                                self.moving_item = Some(file.name.clone());
                             }
+                        });
+                    } else {
+                        //get a preview of the pic
+                        let lower_name = file.name.to_lowercase();
+                        let is_image = lower_name.ends_with(".png")
+                            || lower_name.ends_with(".jpg")
+                            || lower_name.ends_with(".jpeg");
+
+                        if is_image {
+                            // Check our cache
+                            match self.image_cache.get(&file.name) {
+                                Some(ImageState::Loaded(texture)) => {
+                                    // Draw the thumbnail! (Restricted to 32x32 pixels, with slightly rounded corners)
+                                    ui.add(
+                                        egui::Image::new(texture)
+                                            .max_width(64.0)
+                                            .max_height(64.0)
+                                            .rounding(4.0),
+                                    );
+                                }
+                                Some(ImageState::Loading) => {
+                                    ui.spinner(); // Show a loading wheel while it downloads
+                                }
+                                Some(ImageState::Failed) => {
+                                    ui.label("📄"); // Fallback to emoji if it broke
+                                }
+                                None => {
+                                    // We haven't asked for this image yet! Queue it up and show a spinner for now.
+                                    self.fetch_preview(file.name.clone());
+                                    ui.spinner();
+                                }
+                            }
+                        } else {
+                            // Standard file icon for PDFs, TXTs, etc.
+                            ui.label(
+                                egui::RichText::new("📄").font(egui::FontId::proportional(24.0)),
+                            );
+                        }
 
                         ui.label(
-                            egui::RichText::new(&file.name).strong()
-                            .font(egui::FontId::proportional(24.0))
+                            egui::RichText::new(&file.name)
+                                .strong()
+                                .font(egui::FontId::proportional(24.0)),
                         );
 
                         let mb = file.size as f64 / 1_048_576.0;
                         ui.label(format!("({:.2} MB)", mb));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let file_delete_button_raw = egui::RichText::new("🗑 delete")
+                                .color(self.theme.text_primary)
+                                .size(15.0);
+                            let file_delete_button = egui::Button::new(file_delete_button_raw)
+                                .fill(self.theme.delete_btn);
 
-                                let file_delete_button_raw = egui::RichText::new("🗑 delete").color(self.theme.text_primary).size(15.0);
-                                let file_delete_button = egui::Button::new(file_delete_button_raw).fill(self.theme.delete_btn);
+                            let file_move_raw = egui::RichText::new("Move")
+                                .color(self.theme.text_primary)
+                                .size(24.0);
+                            let file_move_button =
+                                egui::Button::new(file_move_raw).fill(self.theme.move_btn);
 
-                                let file_move_raw = egui::RichText::new("Move").color(self.theme.text_primary).size(24.0);
-                                let file_move_button = egui::Button::new(file_move_raw).fill(self.theme.move_btn);
-
-                                let file_download_raw = egui::RichText::new("⬇ Download").color(self.theme.text_primary).size(24.0);
-                                let file_download_button = egui::Button::new(file_download_raw).fill(self.theme.download_btn);
+                            let file_download_raw = egui::RichText::new("⬇ Download")
+                                .color(self.theme.text_primary)
+                                .size(24.0);
+                            let file_download_button =
+                                egui::Button::new(file_download_raw).fill(self.theme.download_btn);
 
                             if ui.add(file_delete_button).clicked() {
                                 //file deletion improved logic
                                 if self.item_pending_deletion.as_deref() == Some(&file.name) {
                                     // SECOND CLICK: Execute the actual delete function
                                     self.delete_item(&file.name);
-        
+
                                     // Clear the state and the message
-                                    self.item_pending_deletion = None; 
-                                    self.status_message = String::new(); 
-                                }else{
+                                    self.item_pending_deletion = None;
+                                    self.status_message = String::new();
+                                } else {
                                     // FIRST CLICK: Queue it up and show the system message
                                     self.item_pending_deletion = Some(file.name.clone());
-                                    self.status_message = format!("Delete '{}'? Click 🗑 again to confirm.", &file.name);
+                                    self.status_message = format!(
+                                        "Delete '{}'? Click 🗑 again to confirm.",
+                                        &file.name
+                                    );
                                 }
-                                }
+                            }
                             ui.add_space(20.0);
                             if ui.add(file_download_button).clicked() {
                                 // Prompt user for where to save the file!
-                                if let Some(save_path) = rfd::FileDialog::new().set_file_name(&file.name).save_file() {
+                                if let Some(save_path) =
+                                    rfd::FileDialog::new().set_file_name(&file.name).save_file()
+                                {
                                     self.download_file(&file.name, save_path);
                                 }
                             }
                             // For Files:
-                        if ui.add(file_move_button).clicked() {
-                            self.moving_item = Some(file.name.clone());
+                            if ui.add(file_move_button).clicked() {
+                                self.moving_item = Some(file.name.clone());
                             }
                         });
                     }
@@ -512,49 +593,61 @@ impl NasClientApp {
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                 .show(ui.ctx(), |ui| {
-
                     ui.label(format!("Moving: {}", item_name));
                     ui.add_space(10.0);
-                    
+
                     ui.label("Select destination:");
-                    
+
                     // --- THE NEW DROPDOWN MENU ---
                     egui::ComboBox::from_id_source("move_dropdown")
                         // Display the currently selected target (or "Root" if it's empty)
-                        .selected_text(if self.move_target_folder.is_empty() { 
-                            "Root (/)".to_string() 
-                        } else { 
-                            format!("/{}", self.move_target_folder) 
+                        .selected_text(if self.move_target_folder.is_empty() {
+                            "Root (/)".to_string()
+                        } else {
+                            format!("/{}", self.move_target_folder)
                         })
                         .width(250.0)
                         .show_ui(ui, |ui| {
                             // 1. Always offer the Root folder
-                            ui.selectable_value(&mut self.move_target_folder, String::new(), "Root (/)");
-                            
+                            ui.selectable_value(
+                                &mut self.move_target_folder,
+                                String::new(),
+                                "Root (/)",
+                            );
+
                             // 2. Offer the Parent folder (if we are currently inside a folder)
                             if !self.current_path.is_empty() {
                                 let mut parts: Vec<&str> = self.current_path.split('/').collect();
                                 parts.pop(); // Go up one level
                                 let parent_path = parts.join("/");
-                                
-                                let display_name = if parent_path.is_empty() { 
-                                    "Root (/)".to_string() 
-                                } else { 
-                                    format!("/{}", parent_path) 
+
+                                let display_name = if parent_path.is_empty() {
+                                    "Root (/)".to_string()
+                                } else {
+                                    format!("/{}", parent_path)
                                 };
-                                
-                                ui.selectable_value(&mut self.move_target_folder, parent_path, format!("⬆ Parent ({})", display_name));
+
+                                ui.selectable_value(
+                                    &mut self.move_target_folder,
+                                    parent_path,
+                                    format!("⬆ Parent ({})", display_name),
+                                );
                             }
 
                             // 3. Offer any Subfolders visible on the current screen
                             for f in &self.files {
-                                if f.is_dir && f.name != item_name { // Don't allow moving a folder inside itself!
+                                if f.is_dir && f.name != item_name {
+                                    // Don't allow moving a folder inside itself!
                                     let target_path = if self.current_path.is_empty() {
                                         f.name.clone()
                                     } else {
                                         format!("{}/{}", self.current_path, f.name)
                                     };
-                                    ui.selectable_value(&mut self.move_target_folder, target_path.clone(), format!("📁 /{}", target_path));
+                                    ui.selectable_value(
+                                        &mut self.move_target_folder,
+                                        target_path.clone(),
+                                        format!("📁 /{}", target_path),
+                                    );
                                 }
                             }
                         });
@@ -564,7 +657,6 @@ impl NasClientApp {
 
                     ui.horizontal(|ui| {
                         if ui.button("Confirm Move").clicked() {
-                            
                             // Get the full source path
                             let source = if self.current_path.is_empty() {
                                 item_name.clone()
@@ -574,20 +666,20 @@ impl NasClientApp {
 
                             // Fire the network thread using your existing function!
                             self.move_item(source, self.move_target_folder.clone(), item_name);
-                            
+
                             // Close the modal and reset
                             self.moving_item = None;
                             self.move_target_folder.clear();
                         }
-                        
+
                         if ui.button("Cancel").clicked() {
                             self.moving_item = None;
                             self.move_target_folder.clear();
                         }
                     });
                 });
+        }
     }
-}
     // ==========================================
     // API NETWORK COMMANDS
     // ==========================================
@@ -608,16 +700,18 @@ impl NasClientApp {
                         tx.send(AppMsg::FilesLoaded(data.files)).unwrap();
                     }
                 }
-                Err(_) => tx.send(AppMsg::Error("Failed to fetch files".into())).unwrap(),
+                Err(_) => tx
+                    .send(AppMsg::Error("Failed to fetch files".into()))
+                    .unwrap(),
             }
         });
     }
 
-   fn upload_files(&mut self, file_paths: Vec<PathBuf>) {
+    fn upload_files(&mut self, file_paths: Vec<PathBuf>) {
         self.is_loading = true;
         self.upload_progress = Some(0.0);
         self.status_message = format!("Uploading {} file(s)...", file_paths.len());
-        
+
         let tx = self.tx.clone();
         let ip = self.ip_input.clone();
         let token = self.token.clone();
@@ -626,12 +720,14 @@ impl NasClientApp {
         thread::spawn(move || {
             let client = get_client();
             let url = format!("https://{}:8080/api/upload_chunk", ip);
-            
-            const CHUNK_SIZE: u64 = 100 * 1024 * 1024; // 100 Megabytes per chunk
 
             for file_path in file_paths {
                 let filename = file_path.file_name().unwrap().to_str().unwrap().to_string();
-                let target_name = if current_path.is_empty() { filename } else { format!("{}/{}", current_path, filename) };
+                let target_name = if current_path.is_empty() {
+                    filename
+                } else {
+                    format!("{}/{}", current_path, filename)
+                };
 
                 let mut file = match std::fs::File::open(&file_path) {
                     Ok(f) => f,
@@ -642,26 +738,34 @@ impl NasClientApp {
                 };
 
                 let file_size = file.metadata().unwrap().len();
-                
-                // Edge case: Uploading a completely empty file (0 bytes)
-                let total_chunks = if file_size == 0 { 1 } else { (file_size as f64 / CHUNK_SIZE as f64).ceil() as u64 };
+
+                const CHUNK_SIZE: u64 = 100 * 1024 * 1024; // 100 Megabytes per chunk
+
+                //the edge case: Uploading a completely empty file (0 bytes)
+                let total_chunks = if file_size == 0 {
+                    1
+                } else {
+                    (file_size as f64 / CHUNK_SIZE as f64).ceil() as u64
+                };
 
                 for chunk_index in 0..total_chunks {
                     // Determine how big this specific chunk should be (the last chunk is usually smaller than 10MB)
-                    let current_chunk_size = std::cmp::min(CHUNK_SIZE, file_size - (chunk_index * CHUNK_SIZE));
+                    let current_chunk_size =
+                        std::cmp::min(CHUNK_SIZE, file_size - (chunk_index * CHUNK_SIZE));
                     let offset = chunk_index * CHUNK_SIZE;
 
                     let mut buffer = vec![0; current_chunk_size as usize];
-                    
+
                     if let Err(e) = file.read_exact(&mut buffer) {
-                        let _ = tx.send(AppMsg::Error(format!("Failed to read local chunk: {}", e)));
+                        let _ =
+                            tx.send(AppMsg::Error(format!("Failed to read local chunk: {}", e)));
                         break;
                     }
 
                     // RETRY LOOP: Try to send the chunk up to 3 times if the network drops
                     let mut attempts = 0;
                     let mut success = false;
-                    
+
                     while attempts < 3 && !success {
                         // We must rebuild the form for every attempt because reqwest consumes it
                         let part = reqwest::blocking::multipart::Part::bytes(buffer.clone())
@@ -684,7 +788,10 @@ impl NasClientApp {
                     }
 
                     if !success {
-                        let _ = tx.send(AppMsg::Error(format!("Upload failed after 3 retries: {}", target_name)));
+                        let _ = tx.send(AppMsg::Error(format!(
+                            "Upload failed after 3 retries: {}",
+                            target_name
+                        )));
                         return; // Completely abort the thread
                     }
 
@@ -697,6 +804,7 @@ impl NasClientApp {
             // All files finished!
             let _ = tx.send(AppMsg::ActionSuccess("Upload complete!".into()));
         });
+        self.upload_progress = Some(0.0);
     }
 
     fn download_file(&mut self, filename: &str, save_path: PathBuf) {
@@ -705,17 +813,22 @@ impl NasClientApp {
         let tx = self.tx.clone();
         let ip = self.ip_input.clone();
         let token = self.token.clone();
-        let full_remote_path = if self.current_path.is_empty() { filename.to_string() } else { format!("{}/{}", self.current_path, filename) };
+        let full_remote_path = if self.current_path.is_empty() {
+            filename.to_string()
+        } else {
+            format!("{}/{}", self.current_path, filename)
+        };
 
         thread::spawn(move || {
             let client = get_client();
             let url = format!("https://{}:8080/api/download/{}", ip, full_remote_path);
-            
+
             match client.get(&url).bearer_auth(token).send() {
                 Ok(mut res) => {
                     if let Ok(mut file) = std::fs::File::create(save_path) {
                         res.copy_to(&mut file).unwrap();
-                        tx.send(AppMsg::ActionSuccess("Download complete!".into())).unwrap();
+                        tx.send(AppMsg::ActionSuccess("Download complete!".into()))
+                            .unwrap();
                     }
                 }
                 Err(_) => tx.send(AppMsg::Error("Download failed".into())).unwrap(),
@@ -724,22 +837,26 @@ impl NasClientApp {
     }
     fn fetch_preview(&mut self, filename: String) {
         // Mark it as loading so we don't spawn 100 threads for the same image
-        self.image_cache.insert(filename.clone(), ImageState::Loading);
-        
+        self.image_cache
+            .insert(filename.clone(), ImageState::Loading);
+
         let tx = self.tx.clone();
         let ip = self.ip_input.clone();
         let token = self.token.clone();
-        
-        let full_path = if self.current_path.is_empty() { 
-            filename.clone() 
-        } else { 
-            format!("{}/{}", self.current_path, filename) 
+
+        let full_path = if self.current_path.is_empty() {
+            filename.clone()
+        } else {
+            format!("{}/{}", self.current_path, filename)
         };
 
         thread::spawn(move || {
             let client = get_client();
-            let url = format!("https://{}:8080/api/download/{}?preview=true", ip, full_path);
-            
+            let url = format!(
+                "https://{}:8080/api/download/{}?preview=true",
+                ip, full_path
+            );
+
             if let Ok(res) = client.get(&url).bearer_auth(token).send() {
                 if let Ok(bytes) = res.bytes() {
                     // Decode the raw web bytes into a dynamic image
@@ -747,13 +864,11 @@ impl NasClientApp {
                         let size = [img.width() as _, img.height() as _];
                         let image_buffer = img.to_rgba8();
                         let pixels = image_buffer.as_flat_samples();
-                        
+
                         // Convert to egui's specific color format
-                        let color_image = egui::ColorImage::from_rgba_unmultiplied(
-                            size,
-                            pixels.as_slice(),
-                        );
-                        
+                        let color_image =
+                            egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
+
                         tx.send(AppMsg::ImageLoaded(filename, color_image)).unwrap();
                         return;
                     }
@@ -768,15 +883,26 @@ impl NasClientApp {
         let tx = self.tx.clone();
         let ip = self.ip_input.clone();
         let token = self.token.clone();
-        let full_path = if self.current_path.is_empty() { folder_name } else { format!("{}/{}", self.current_path, folder_name) };
+        let full_path = if self.current_path.is_empty() {
+            folder_name
+        } else {
+            format!("{}/{}", self.current_path, folder_name)
+        };
 
         thread::spawn(move || {
             let client = get_client();
             let url = format!("https://{}:8080/api/folders", ip);
             let payload = serde_json::json!({ "path": full_path });
 
-            if client.post(&url).bearer_auth(token).json(&payload).send().is_ok() {
-                tx.send(AppMsg::ActionSuccess("Folder created".into())).unwrap();
+            if client
+                .post(&url)
+                .bearer_auth(token)
+                .json(&payload)
+                .send()
+                .is_ok()
+            {
+                tx.send(AppMsg::ActionSuccess("Folder created".into()))
+                    .unwrap();
             }
         });
     }
@@ -790,7 +916,7 @@ impl NasClientApp {
         thread::spawn(move || {
             let client = get_client();
             let url = format!("https://{}:8080/api/move", ip);
-            
+
             // Construct the final destination path
             let destination_path = if destination_folder.is_empty() {
                 file_name // Moving it to the root FileStorage
@@ -805,10 +931,15 @@ impl NasClientApp {
 
             match client.post(&url).bearer_auth(token).json(&payload).send() {
                 Ok(res) if res.status().is_success() => {
-                    tx.send(AppMsg::ActionSuccess("Item moved successfully!".into())).unwrap();
+                    tx.send(AppMsg::ActionSuccess("Item moved successfully!".into()))
+                        .unwrap();
                 }
-                Ok(_) => tx.send(AppMsg::Error("Failed to move item.".into())).unwrap(),
-                Err(e) => tx.send(AppMsg::Error(format!("Network error: {}", e))).unwrap(),
+                Ok(_) => tx
+                    .send(AppMsg::Error("Failed to move item.".into()))
+                    .unwrap(),
+                Err(e) => tx
+                    .send(AppMsg::Error(format!("Network error: {}", e)))
+                    .unwrap(),
             }
         });
     }
@@ -818,15 +949,26 @@ impl NasClientApp {
         let tx = self.tx.clone();
         let ip = self.ip_input.clone();
         let token = self.token.clone();
-        let full_path = if self.current_path.is_empty() { item_name.to_string() } else { format!("{}/{}", self.current_path, item_name) };
+        let full_path = if self.current_path.is_empty() {
+            item_name.to_string()
+        } else {
+            format!("{}/{}", self.current_path, item_name)
+        };
 
         thread::spawn(move || {
             let client = get_client();
             let url = format!("https://{}:8080/api/delete", ip);
             let payload = serde_json::json!({ "path": full_path });
 
-            if client.post(&url).bearer_auth(token).json(&payload).send().is_ok() {
-                tx.send(AppMsg::ActionSuccess("Deleted successfully".into())).unwrap();
+            if client
+                .post(&url)
+                .bearer_auth(token)
+                .json(&payload)
+                .send()
+                .is_ok()
+            {
+                tx.send(AppMsg::ActionSuccess("Deleted successfully".into()))
+                    .unwrap();
             }
         });
     }
@@ -877,7 +1019,7 @@ fn load_theme() -> AppTheme {
         text_primary: egui::Color32::BLACK,
         text_dashboard: egui::Color32::WHITE,
         text_title: egui::Color32::from_hex("#2de7f5").unwrap(),
-        download_btn: egui::Color32::from_hex("#2de7f5").unwrap(), 
+        download_btn: egui::Color32::from_hex("#2de7f5").unwrap(),
         upload_btn: egui::Color32::from_hex("#ac5ddc").unwrap(),
         delete_btn: egui::Color32::from_hex("#dc3545").unwrap(),
         move_btn: egui::Color32::from_hex("#f07d12").unwrap(),
@@ -925,9 +1067,13 @@ fn load_theme() -> AppTheme {
                 match key.as_str() {
                     "background" => theme.background = parse_hex(hex_val, theme.background),
                     "text_primary" => theme.text_primary = parse_hex(hex_val, theme.text_primary),
-                    "text_dashboard" => theme.text_dashboard = parse_hex(hex_val, theme.text_dashboard),
+                    "text_dashboard" => {
+                        theme.text_dashboard = parse_hex(hex_val, theme.text_dashboard)
+                    }
                     "text_title" => theme.text_title = parse_hex(hex_val, theme.text_title),
-                    "download_button" => theme.download_btn = parse_hex(hex_val, theme.download_btn),
+                    "download_button" => {
+                        theme.download_btn = parse_hex(hex_val, theme.download_btn)
+                    }
                     "upload_button" => theme.upload_btn = parse_hex(hex_val, theme.upload_btn),
                     "delete_button" => theme.delete_btn = parse_hex(hex_val, theme.delete_btn),
                     "move_button" => theme.move_btn = parse_hex(hex_val, theme.move_btn),
@@ -941,6 +1087,6 @@ fn load_theme() -> AppTheme {
             }
         }
     }
-    
+
     theme
 }
