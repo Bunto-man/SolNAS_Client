@@ -1026,9 +1026,9 @@ impl NasClientApp {
 
         std::thread::spawn(move || {
             let client = get_client();
-            let total_files = files.len();
+            //let total_files = files.len();
             //total_files and index are only useful for tracking downloads. This doesn't exist yet.
-            for (index, filename) in files.iter().enumerate() {
+            for (_index, filename) in files.iter().enumerate() {
                 // Determine the correct server path
                 let full_path = if current_path.is_empty() {
                     filename.clone()
@@ -1085,7 +1085,7 @@ fn load_theme() -> AppTheme {
         background: egui::Color32::from_hex("#250444").unwrap(), // Dark Navy
         text_primary: egui::Color32::BLACK,
         text_dashboard: egui::Color32::WHITE,
-        text_title: egui::Color32::from_hex("#6a0774").unwrap(),
+        text_title: egui::Color32::from_hex("#FFFFFF").unwrap(),
         download_btn: egui::Color32::from_hex("#28a792").unwrap(),
         upload_btn: egui::Color32::from_hex("#ac5ddc").unwrap(),
         delete_btn: egui::Color32::from_hex("#dc3545").unwrap(),
@@ -1104,7 +1104,7 @@ fn load_theme() -> AppTheme {
                            Background = #250444\n\
                            Text_Primary = #000000\n\
                            Text_dashboard = #FFFFFF\n\
-                           text_title = #6a0774\n\
+                           text_title =     #FFFFFF\n\
                            Download_Button = #28a792\n\
                            upload_btn = #ac5ddc\n\
                            Delete_Button = #dc3545\n\
