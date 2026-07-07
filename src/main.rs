@@ -1,12 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] //this gets rid of the terminal popup
 //use
 use eframe::egui;
-use egui::{
-    Color32,
-    //ProgressBar
-};
+use egui::Color32;
+
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashSet,
     io::Read,
     path::PathBuf,
     sync::mpsc::{self, Receiver, Sender},
@@ -114,8 +113,8 @@ struct NasClientApp {
     image_cache: std::collections::HashMap<String, ImageState>,
 
     upload_progress: Option<f32>,
-
     theme: AppTheme,
+    selected_files: HashSet<String>,
 }
 // -- Give Default values to the app to prevent bugs.
 impl Default for NasClientApp {
@@ -139,6 +138,7 @@ impl Default for NasClientApp {
             item_pending_deletion: None, //new
             image_cache: std::collections::HashMap::new(),
             upload_progress: None, //don't forget the defaults.
+            selected_files: HashSet::new(),
         }
     }
 }
@@ -419,6 +419,35 @@ impl NasClientApp {
         if self.is_loading {
             ui.spinner();
         }
+        //All Brand New Stuff 7/6/2026
+        if !self.selected_files.is_empty() {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(format!("{} files selected", self.selected_files.len()))
+                        .strong(),
+                );
+
+                if ui.button("⬇ Download All").clicked() {
+                    // Ask the user for a FOLDER, not a file!
+                    if let Some(save_folder) = rfd::FileDialog::new().pick_folder() {
+                        // Convert the HashSet into a Vector so we can pass it to our background thread
+                        let files_to_download: Vec<String> =
+                            self.selected_files.clone().into_iter().collect();
+
+                        // Fire off the new batch download function
+                        self.download_multiple_files(files_to_download, save_folder);
+
+                        // Clear the checkboxes immediately so the UI resets
+                        self.selected_files.clear();
+                    }
+                }
+
+                if ui.button("Clear Selection").clicked() {
+                    self.selected_files.clear();
+                }
+            });
+            ui.separator();
+        }
 
         // File List Area
         egui::ScrollArea::vertical().show(ui, |ui| {
@@ -486,6 +515,14 @@ impl NasClientApp {
                             }
                         });
                     } else {
+                        let mut is_selected = self.selected_files.contains(&file.name);
+                        if ui.checkbox(&mut is_selected, "").clicked() {
+                            if is_selected {
+                                self.selected_files.insert(file.name.clone());
+                            } else {
+                                self.selected_files.remove(&file.name);
+                            }
+                        }
                         //get a preview of the pic
                         let lower_name = file.name.to_lowercase();
                         let is_image = lower_name.ends_with(".png")
@@ -835,6 +872,11 @@ impl NasClientApp {
             }
         });
     }
+    ///## Fetch Preview
+    ///
+    /// - A cute little function that gives a preview of the picture
+    /// - probably won't work for odd picture formats or Gifs.
+    ///
     fn fetch_preview(&mut self, filename: String) {
         // Mark it as loading so we don't spawn 100 threads for the same image
         self.image_cache
@@ -972,6 +1014,48 @@ impl NasClientApp {
             }
         });
     }
+    // New Stuff 7/6/2026
+    fn download_multiple_files(&mut self, files: Vec<String>, save_folder: std::path::PathBuf) {
+        self.is_loading = true;
+        self.status_message = format!("Downloading {} files...", files.len());
+
+        let tx = self.tx.clone();
+        let ip = self.ip_input.clone();
+        let token = self.token.clone();
+        let current_path = self.current_path.clone();
+
+        std::thread::spawn(move || {
+            let client = get_client();
+            let total_files = files.len();
+            //total_files and index are only useful for tracking downloads. This doesn't exist yet.
+            for (index, filename) in files.iter().enumerate() {
+                // Determine the correct server path
+                let full_path = if current_path.is_empty() {
+                    filename.clone()
+                } else {
+                    format!("{}/{}", current_path, filename)
+                };
+
+                let url = format!("https://{}:8080/api/download/{}", ip, full_path);
+
+                // Construct the exact local file path (e.g., C:\Users\You\Downloads\report.pdf)
+                let target_file_path = save_folder.join(filename);
+
+                // Fetch the file from the server
+                if let Ok(mut res) = client.get(&url).bearer_auth(&token).send() {
+                    if res.status().is_success() {
+                        // Create the local file and write the stream into it
+                        if let Ok(mut local_file) = std::fs::File::create(&target_file_path) {
+                            let _ = std::io::copy(&mut res, &mut local_file);
+                        }
+                    }
+                }
+            }
+
+            // All files finished!
+            let _ = tx.send(AppMsg::ActionSuccess("Batch download complete!".into()));
+        });
+    }
 }
 
 // --- Config Helpers ---
@@ -987,23 +1071,6 @@ fn save_config(ip: &str) {
     let _ = std::fs::write(CONFIG_FILE, format!("NAS_IP={}\n", ip));
 }
 
-// --- Main Entry ---
-fn main() {
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1000.0, 900.0])
-            .with_title("SolNAS Client App")
-            .with_transparent(true), //allow transparency
-        ..Default::default()
-    };
-
-    let _ = eframe::run_native(
-        "SolNAS Client",
-        options,
-        Box::new(|_cc| Box::new(NasClientApp::default()) as Box<dyn eframe::App>),
-    );
-}
-
 // The Style Update
 ///# Parse Hex
 ///The Hex Parser for the Color
@@ -1015,16 +1082,16 @@ fn parse_hex(hex: &str, fallback: egui::Color32) -> egui::Color32 {
 fn load_theme() -> AppTheme {
     // Define your hardcoded default fallback colors here
     let mut theme = AppTheme {
-        background: egui::Color32::from_hex("#00251d").unwrap(), // Dark Navy
+        background: egui::Color32::from_hex("#250444").unwrap(), // Dark Navy
         text_primary: egui::Color32::BLACK,
         text_dashboard: egui::Color32::WHITE,
-        text_title: egui::Color32::from_hex("#2de7f5").unwrap(),
-        download_btn: egui::Color32::from_hex("#2de7f5").unwrap(),
+        text_title: egui::Color32::from_hex("#6a0774").unwrap(),
+        download_btn: egui::Color32::from_hex("#28a792").unwrap(),
         upload_btn: egui::Color32::from_hex("#ac5ddc").unwrap(),
         delete_btn: egui::Color32::from_hex("#dc3545").unwrap(),
         move_btn: egui::Color32::from_hex("#f07d12").unwrap(),
         logout_btn: egui::Color32::from_hex("#ac5ddc").unwrap(),
-        connect_btn: egui::Color32::from_hex("#23f534").unwrap(),
+        connect_btn: egui::Color32::from_hex("#fcba00").unwrap(),
         open_btn: egui::Color32::from_hex("#ac5ddc").unwrap(),
         refresh_btn: egui::Color32::from_hex("#ac5ddc").unwrap(),
         path_btn: egui::Color32::from_hex("#5ddcab").unwrap(),
@@ -1034,16 +1101,16 @@ fn load_theme() -> AppTheme {
     if !std::path::Path::new(STYLE_FILE).exists() {
         println!("Style file not found. Creating {}...", STYLE_FILE);
         let default_ini = "[Colors]\n\
-                           Background = #00251d\n\
+                           Background = #250444\n\
                            Text_Primary = #000000\n\
                            Text_dashboard = #FFFFFF\n\
-                           text_title = #2de7f5\n\
+                           text_title = #6a0774\n\
                            Download_Button = #28a792\n\
                            upload_btn = #ac5ddc\n\
                            Delete_Button = #dc3545\n\
                            move_btn = #f07d12\n\
                            logout_btn = #ac5ddc\n\
-                           connect_btn = #23f534\n\
+                           connect_btn = #fcba00\n\
                            open_btn = #ac5ddc\n\
                            refresh_btn = #ac5ddc\n\
                            path_btn = #5ddcab\n\
@@ -1089,4 +1156,21 @@ fn load_theme() -> AppTheme {
     }
 
     theme
+}
+
+// --- Main Entry ---
+fn main() {
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([1000.0, 900.0])
+            .with_title("SolNAS Client App")
+            .with_transparent(true), //allow transparency
+        ..Default::default()
+    };
+
+    let _ = eframe::run_native(
+        "SolNAS Client",
+        options,
+        Box::new(|_cc| Box::new(NasClientApp::default()) as Box<dyn eframe::App>),
+    );
 }
