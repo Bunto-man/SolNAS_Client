@@ -19,7 +19,11 @@ const CONFIG_FILE: &str = "config.ini";
 struct AuthRequest {
     password: String,
 }
-
+#[derive(serde::Deserialize, serde::Serialize, Clone, Default)]
+struct AppConfig {
+    max_upload_size: u64,
+    upload_speed_bps: u64,
+}
 #[derive(Deserialize)]
 struct AuthResponse {
     token: Option<String>,
@@ -73,6 +77,8 @@ enum AppMsg {
 
     ImageLoaded(String, egui::ColorImage),
     ImageFailed(String),
+    ConfigLoaded(AppConfig),
+    ConfigSaved,
 }
 enum ImageState {
     Loading,
@@ -115,6 +121,9 @@ struct NasClientApp {
     upload_progress: Option<f32>,
     theme: AppTheme,
     selected_files: HashSet<String>,
+
+    show_config_modal: bool,
+    active_config: Option<AppConfig>,
 }
 // -- Give Default values to the app to prevent bugs.
 impl Default for NasClientApp {
@@ -139,6 +148,8 @@ impl Default for NasClientApp {
             image_cache: std::collections::HashMap::new(),
             upload_progress: None, //don't forget the defaults.
             selected_files: HashSet::new(),
+            show_config_modal: false,
+            active_config: None,
         }
     }
 }
@@ -202,6 +213,17 @@ impl eframe::App for NasClientApp {
                 }
                 AppMsg::UploadProgress(pct) => {
                     self.upload_progress = Some(pct);
+                }
+                AppMsg::ConfigLoaded(config) => {
+                    self.is_loading = false;
+                    self.active_config = Some(config);
+                    self.show_config_modal = true; // Open the window!
+                    self.status_message = "✅ Config received! Opening modal...".into();
+                }
+                AppMsg::ConfigSaved => {
+                    self.is_loading = false;
+                    self.show_config_modal = false; // Close the window!
+                    self.status_message = "Server configuration updated successfully!".into();
                 }
             }
         }
@@ -354,7 +376,9 @@ impl NasClientApp {
                 self.view = ViewState::Login;
             }
             ui.separator();
-
+            if ui.button("⚙ Server Config").clicked() {
+                self.fetch_remote_config();
+            }
             if !self.current_path.is_empty() {
                 if ui.add(back_button).clicked() {
                     let mut parts: Vec<&str> = self.current_path.split('/').collect();
@@ -635,9 +659,8 @@ impl NasClientApp {
 
                     ui.label("Select destination:");
 
-                    // --- THE NEW DROPDOWN MENU ---
+                    // --- THE DROPDOWN MENU ---
                     egui::ComboBox::from_id_source("move_dropdown")
-                        // Display the currently selected target (or "Root" if it's empty)
                         .selected_text(if self.move_target_folder.is_empty() {
                             "Root (/)".to_string()
                         } else {
@@ -674,7 +697,6 @@ impl NasClientApp {
                             // 3. Offer any Subfolders visible on the current screen
                             for f in &self.files {
                                 if f.is_dir && f.name != item_name {
-                                    // Don't allow moving a folder inside itself!
                                     let target_path = if self.current_path.is_empty() {
                                         f.name.clone()
                                     } else {
@@ -688,23 +710,20 @@ impl NasClientApp {
                                 }
                             }
                         });
-                    // -----------------------------
 
                     ui.add_space(15.0);
 
+                    // --- MOVED INSIDE THE WINDOW CLOSURE ---
                     ui.horizontal(|ui| {
                         if ui.button("Confirm Move").clicked() {
-                            // Get the full source path
                             let source = if self.current_path.is_empty() {
                                 item_name.clone()
                             } else {
                                 format!("{}/{}", self.current_path, item_name)
                             };
 
-                            // Fire the network thread using your existing function!
                             self.move_item(source, self.move_target_folder.clone(), item_name);
 
-                            // Close the modal and reset
                             self.moving_item = None;
                             self.move_target_folder.clear();
                         }
@@ -715,6 +734,71 @@ impl NasClientApp {
                         }
                     });
                 });
+        }
+
+        // ==========================================
+        // 2. THE SERVER CONFIG MODAL (Completely independent)
+        // ==========================================
+        if self.show_config_modal {
+            // 1. Create temporary flags outside the closure
+            let mut trigger_save = false;
+            let mut close_modal = false;
+
+            egui::Window::new("⚙ Server Configuration")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ui.ctx(), |ui| {
+                    // 2. We do the mutable borrow INSIDE the window now
+                    if let Some(config) = &mut self.active_config {
+                        ui.label("Max Upload Size:");
+
+                        // 1. Convert the backend's bytes into a temporary Megabyte decimal
+                        let mut size_in_mb = config.max_upload_size as f64 / 1_048_576.0;
+
+                        // 2. Draw the DragValue using the MB variable
+                        // We also add a visual " MB" suffix so it looks professional!
+                        if ui
+                            .add(
+                                egui::DragValue::new(&mut size_in_mb)
+                                    .speed(100.0) // Dragging moves it by 1 MB at a time
+                                    .suffix(" MB"),
+                            )
+                            .changed()
+                        {
+                            // 3. If the user edits the number, convert it back to bytes immediately!
+                            config.max_upload_size = (size_in_mb * 1_048_576.0) as u64;
+                        }
+
+                        ui.add_space(10.0);
+
+                        ui.label("Upload Speed Limit (Bytes per second): (0 = Unlimited)");
+                        ui.add(egui::DragValue::new(&mut config.upload_speed_bps).speed(1024.0));
+
+                        ui.add_space(20.0);
+
+                        ui.horizontal(|ui| {
+                            // 3. We ONLY flip the booleans inside the closure. No `self` calls here!
+                            if ui.button("Save & Apply").clicked() {
+                                trigger_save = true;
+                            }
+                            if ui.button("Cancel").clicked() {
+                                close_modal = true;
+                            }
+                        });
+                    }
+                });
+
+            // 4. Safely outside the closure, the borrow is dropped, so we can freely use `self` again!
+            if trigger_save {
+                if let Some(config) = self.active_config.clone() {
+                    self.save_remote_config(config);
+                }
+            }
+
+            if close_modal {
+                self.show_config_modal = false;
+            }
         }
     }
     // ==========================================
@@ -1054,6 +1138,84 @@ impl NasClientApp {
 
             // All files finished!
             let _ = tx.send(AppMsg::ActionSuccess("Batch download complete!".into()));
+        });
+    }
+    fn fetch_remote_config(&mut self) {
+        self.is_loading = true;
+        let tx = self.tx.clone();
+        let ip = self.ip_input.clone();
+        let token = self.token.clone();
+
+        std::thread::spawn(move || {
+            let client = get_client();
+            let url = format!("https://{}:8080/api/config", ip);
+
+            // We use 'match' here to capture the exact error if it fails
+            match client.get(&url).bearer_auth(token).send() {
+                Ok(res) => {
+                    let status = res.status();
+
+                    match res.text() {
+                        Ok(raw_text) => {
+                            if status.is_success() {
+                                // Try to parse the JSON
+                                match serde_json::from_str::<AppConfig>(&raw_text) {
+                                    Ok(config) => {
+                                        let _ = tx.send(AppMsg::ConfigLoaded(config));
+                                    }
+                                    Err(e) => {
+                                        // Tell the UI that the JSON didn't match our struct
+                                        let _ = tx.send(AppMsg::Error(format!(
+                                            "JSON Error: {}. Raw data: {}",
+                                            e, raw_text
+                                        )));
+                                    }
+                                }
+                            } else {
+                                // Tell the UI that the server rejected the request (e.g. 404, 401, 500)
+                                let _ = tx.send(AppMsg::Error(format!(
+                                    "Server Error {}: {}",
+                                    status, raw_text
+                                )));
+                            }
+                        }
+                        Err(e) => {
+                            let _ = tx.send(AppMsg::Error(format!(
+                                "Failed to read server response: {}",
+                                e
+                            )));
+                        }
+                    }
+                }
+                Err(e) => {
+                    // Tell the UI that we couldn't even reach the server
+                    let _ = tx.send(AppMsg::Error(format!("Network Error: {}", e)));
+                }
+            }
+        });
+    }
+
+    fn save_remote_config(&mut self, new_config: AppConfig) {
+        self.is_loading = true;
+        let tx = self.tx.clone();
+        let ip = self.ip_input.clone();
+        let token = self.token.clone();
+
+        std::thread::spawn(move || {
+            let client = get_client();
+            let url = format!("https://{}:8080/api/config", ip);
+
+            if client
+                .post(&url)
+                .bearer_auth(token)
+                .json(&new_config)
+                .send()
+                .is_ok()
+            {
+                let _ = tx.send(AppMsg::ConfigSaved);
+            } else {
+                let _ = tx.send(AppMsg::Error("Failed to save server configuration.".into()));
+            }
         });
     }
 }
