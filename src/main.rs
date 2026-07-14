@@ -1005,6 +1005,16 @@ impl NasClientApp {
         });
     }
     fn create_folder(&mut self, folder_name: String) {
+        if self
+            .files
+            .iter()
+            .any(|f| f.is_dir && f.name.eq_ignore_ascii_case(&folder_name))
+        {
+            // Abort immediately and display the cute system message!
+            self.status_message =
+                format!("Cannot create folder: '{}' already exists ☆☆☆", folder_name);
+            return;
+        } //Prevent the issue that Jakob talked about.
         self.is_loading = true;
         let tx = self.tx.clone();
         let ip = self.ip_input.clone();
