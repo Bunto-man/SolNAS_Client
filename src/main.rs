@@ -1,7 +1,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] //this gets rid of the terminal popup
+//free optimization?
+use mimalloc::MiMalloc;
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
 //use
 use eframe::egui;
 use egui::Color32;
+use once_cell::sync::Lazy;
+use reqwest::blocking::Client;
 
 use serde::{Deserialize, Serialize};
 use std::{
@@ -91,8 +98,18 @@ enum ViewState {
     Login,
     Dashboard,
 }
+/// - This should replace all the other HTTP client instances...
+/// - Part of the stupid memory leak update
+/// - Use the pointer 'let client = HTTP_CLIENT.clone(); instead of those new calls'
+static HTTP_CLIENT: Lazy<Client> = Lazy::new(|| {
+    Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .expect("Failed to build the global HTTP client")
+});
 
-// --- The Main App State ---
+/// - The Main App State
+/// - [x] this holds all the states. Simple!
 struct NasClientApp {
     view: ViewState,
     tx: Sender<AppMsg>,
@@ -125,7 +142,8 @@ struct NasClientApp {
     show_config_modal: bool,
     active_config: Option<AppConfig>,
 }
-// -- Give Default values to the app to prevent bugs.
+/// - Give Default values to the app to prevent bugs.
+/// - Each new value for the NasClientApp struct needs a default!
 impl Default for NasClientApp {
     fn default() -> Self {
         let (tx, rx) = mpsc::channel();
@@ -154,26 +172,20 @@ impl Default for NasClientApp {
     }
 }
 
-/// --- Helper for HTTPS ---
-/// ### This function does as it says. It builds a client and ignores the self signed certificates.
-fn get_client() -> reqwest::blocking::Client {
-    reqwest::blocking::Client::builder()
-        .danger_accept_invalid_certs(true)
-        .build()
-        .unwrap()
-}
 // The method to make the app pretty
+// this implements the UI details for the dashboard and lock screen.
 impl eframe::App for NasClientApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // 1. Process any messages from background threads
 
+        //uses the custom style
         let mut style = (*ctx.style()).clone();
 
         style.spacing.item_spacing = egui::vec2(15.0, 15.0);
         style.visuals.widgets.noninteractive.rounding = egui::Rounding::same(8.0);
         style.visuals.widgets.inactive.rounding = egui::Rounding::same(8.0);
 
-        ctx.set_style(style); //actualy save the changes
+        ctx.set_style(style); //actually save the changes to the app
 
         while let Ok(msg) = self.rx.try_recv() {
             self.is_loading = false;
@@ -243,9 +255,6 @@ impl eframe::App for NasClientApp {
 
 // basically implements the whole entire app. have fun.
 impl NasClientApp {
-    // ==========================================
-    // UI RENDERING
-    // ==========================================
     /// # Render Login
     ///
     ///  * This function puts each of the buttons and text on the login page.
@@ -308,7 +317,7 @@ impl NasClientApp {
                     let tx = self.tx.clone();
 
                     thread::spawn(move || {
-                        let client = get_client();
+                        let client = HTTP_CLIENT.clone();
                         let url = format!("https://{}:8080/api/auth", ip);
                         let payload = AuthRequest { password: pwd };
 
@@ -342,7 +351,12 @@ impl NasClientApp {
             ui.label(egui::RichText::new(&self.status_message).color(egui::Color32::BLACK));
         }
     }
-
+    /// # Render dashboard
+    ///
+    /// This function is important since it is how the buttons and other interactable items are made.
+    /// - Lots of variables I know, but it's easier to split the color of the text from the fill of the box.
+    ///
+    ///
     fn render_dashboard(&mut self, ui: &mut egui::Ui) {
         let back_button_raw = egui::RichText::new("⬅ Path Back")
             .color(self.theme.text_dashboard)
@@ -369,16 +383,21 @@ impl NasClientApp {
             .color(self.theme.text_dashboard)
             .size(14.0);
         let logout_button = egui::Button::new(logout_raw).fill(self.theme.logout_btn);
+
         // Top Navigation Bar
+        // the first item is the logout button
         ui.horizontal(|ui| {
             if ui.add(logout_button).clicked() {
                 self.token.clear();
                 self.view = ViewState::Login;
             }
+
             ui.separator();
+            // next is the server config button.
             if ui.button("⚙ Server Config").clicked() {
                 self.fetch_remote_config();
             }
+            // now the back button.
             if !self.current_path.is_empty() {
                 if ui.add(back_button).clicked() {
                     let mut parts: Vec<&str> = self.current_path.split('/').collect();
@@ -388,7 +407,7 @@ impl NasClientApp {
                 }
             }
             ui.label(egui::RichText::new(format!("/{}", self.current_path)).strong());
-
+            //refresh button is last of the top.
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.add(refresh_button).clicked() {
                     self.refresh_files();
@@ -400,6 +419,7 @@ impl NasClientApp {
 
         // Toolbar (Upload & Create Folder)
         ui.horizontal(|ui| {
+            //the upload button is first.
             if ui.add(upload_button).clicked() {
                 if let Some(path) = rfd::FileDialog::new().pick_files() {
                     self.upload_files(path);
@@ -407,7 +427,7 @@ impl NasClientApp {
             }
 
             ui.separator();
-
+            //now add the 'add folder' button.
             ui.add(
                 egui::TextEdit::singleline(&mut self.new_folder_name)
                     .hint_text("New folder name...")
@@ -736,11 +756,9 @@ impl NasClientApp {
                 });
         }
 
-        // ==========================================
         // 2. THE SERVER CONFIG MODAL (Completely independent)
-        // ==========================================
+
         if self.show_config_modal {
-            // 1. Create temporary flags outside the closure
             let mut trigger_save = false;
             let mut close_modal = false;
 
@@ -753,7 +771,7 @@ impl NasClientApp {
                     if let Some(config) = &mut self.active_config {
                         ui.label("Max Upload Size:");
 
-                        // 1. Convert the backend's bytes into a temporary Megabyte decimal
+                        // 1. Convert the backend's bytes into a Megabyte decimal
                         let mut size_in_mb = config.max_upload_size as f64 / 1_048_576.0;
 
                         // 2. Draw the DragValue using the MB variable
@@ -801,9 +819,8 @@ impl NasClientApp {
             }
         }
     }
-    // ==========================================
-    // API NETWORK COMMANDS
-    // ==========================================
+
+    // This is where all of the network functions are called.
 
     fn refresh_files(&mut self) {
         self.is_loading = true;
@@ -813,7 +830,7 @@ impl NasClientApp {
         let path = self.current_path.clone();
 
         thread::spawn(move || {
-            let client = get_client();
+            let client = HTTP_CLIENT.clone();
             let url = format!("https://{}:8080/api/files?path={}", ip, path);
             match client.get(&url).bearer_auth(token).send() {
                 Ok(res) => {
@@ -839,7 +856,7 @@ impl NasClientApp {
         let current_path = self.current_path.clone();
 
         thread::spawn(move || {
-            let client = get_client();
+            let client = HTTP_CLIENT.clone();
             let url = format!("https://{}:8080/api/upload_chunk", ip);
 
             for file_path in file_paths {
@@ -941,7 +958,7 @@ impl NasClientApp {
         };
 
         thread::spawn(move || {
-            let client = get_client();
+            let client = HTTP_CLIENT.clone();
             let url = format!("https://{}:8080/api/download/{}", ip, full_remote_path);
 
             match client.get(&url).bearer_auth(token).send() {
@@ -977,7 +994,7 @@ impl NasClientApp {
         };
 
         thread::spawn(move || {
-            let client = get_client();
+            let client = HTTP_CLIENT.clone();
             let url = format!(
                 "https://{}:8080/api/download/{}?preview=true",
                 ip, full_path
@@ -1026,7 +1043,7 @@ impl NasClientApp {
         };
 
         thread::spawn(move || {
-            let client = get_client();
+            let client = HTTP_CLIENT.clone();
             let url = format!("https://{}:8080/api/folders", ip);
             let payload = serde_json::json!({ "path": full_path });
 
@@ -1050,7 +1067,7 @@ impl NasClientApp {
         let token = self.token.clone();
 
         thread::spawn(move || {
-            let client = get_client();
+            let client = HTTP_CLIENT.clone();
             let url = format!("https://{}:8080/api/move", ip);
 
             // Construct the final destination path
@@ -1092,7 +1109,7 @@ impl NasClientApp {
         };
 
         thread::spawn(move || {
-            let client = get_client();
+            let client = HTTP_CLIENT.clone();
             let url = format!("https://{}:8080/api/delete", ip);
             let payload = serde_json::json!({ "path": full_path });
 
@@ -1119,7 +1136,7 @@ impl NasClientApp {
         let current_path = self.current_path.clone();
 
         std::thread::spawn(move || {
-            let client = get_client();
+            let client = HTTP_CLIENT.clone();
             //let total_files = files.len();
             //total_files and index are only useful for tracking downloads. This doesn't exist yet.
             for (_index, filename) in files.iter().enumerate() {
@@ -1157,7 +1174,7 @@ impl NasClientApp {
         let token = self.token.clone();
 
         std::thread::spawn(move || {
-            let client = get_client();
+            let client = HTTP_CLIENT.clone();
             let url = format!("https://{}:8080/api/config", ip);
 
             // We use 'match' here to capture the exact error if it fails
@@ -1212,7 +1229,7 @@ impl NasClientApp {
         let token = self.token.clone();
 
         std::thread::spawn(move || {
-            let client = get_client();
+            let client = HTTP_CLIENT.clone();
             let url = format!("https://{}:8080/api/config", ip);
 
             if client
@@ -1269,7 +1286,7 @@ fn load_theme() -> AppTheme {
         path_btn: egui::Color32::from_hex("#5ddcab").unwrap(),
         folder_btn: egui::Color32::from_hex("#ac5ddc").unwrap(),
     };
-
+    //This just implements a ton of hardcoded default styles.
     if !std::path::Path::new(STYLE_FILE).exists() {
         println!("Style file not found. Creating {}...", STYLE_FILE);
         let default_ini = "[Colors]\n\
