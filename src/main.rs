@@ -1,15 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] //this gets rid of the terminal popup
-//free optimization?
-use mimalloc::MiMalloc;
-
-#[global_allocator]
-static GLOBAL: MiMalloc = MiMalloc;
-//use
 use eframe::egui;
 use egui::Color32;
 use once_cell::sync::Lazy;
 use reqwest::blocking::Client;
-
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
@@ -18,9 +11,12 @@ use std::{
     sync::mpsc::{self, Receiver, Sender},
     thread,
 };
+use tray_icon::TrayIcon;
 
-const CONFIG_FILE: &str = "config.ini";
-
+//-------------------------------------------------------------------
+// -- Ini Files --
+const CONFIG_FILE: &str = "clientConfig.ini";
+const STYLE_FILE: &str = "style.ini";
 // --- Data Structures ---
 #[derive(Serialize)]
 struct AuthRequest {
@@ -71,8 +67,7 @@ struct AppTheme {
     path_btn: egui::Color32,
     folder_btn: egui::Color32,
 } //add onto these as you need to.
-
-const STYLE_FILE: &str = "style.ini";
+//------------------------------------------------------------------------------------------
 // --- Background Worker Messages ---
 enum AppMsg {
     LoginSuccess(String),
@@ -86,6 +81,7 @@ enum AppMsg {
     ImageFailed(String),
     ConfigLoaded(AppConfig),
     ConfigSaved,
+    RestoreWindow,
 }
 enum ImageState {
     Loading,
@@ -98,6 +94,7 @@ enum ViewState {
     Login,
     Dashboard,
 }
+//--------------------------------------------------------------------------------
 /// - This should replace all the other HTTP client instances...
 /// - Part of the stupid memory leak update
 /// - Use the pointer 'let client = HTTP_CLIENT.clone(); instead of those new calls'
@@ -110,6 +107,7 @@ static HTTP_CLIENT: Lazy<Client> = Lazy::new(|| {
 
 /// - The Main App State
 /// - [x] this holds all the states. Simple!
+/// each time it's called, It's probably getting a new state.
 struct NasClientApp {
     view: ViewState,
     tx: Sender<AppMsg>,
@@ -141,12 +139,40 @@ struct NasClientApp {
 
     show_config_modal: bool,
     active_config: Option<AppConfig>,
+
+    tray_icon: Option<TrayIcon>,
+    tray_listener_spawned: bool,
+    is_hidden: bool,
 }
 /// - Give Default values to the app to prevent bugs.
 /// - Each new value for the NasClientApp struct needs a default!
 impl Default for NasClientApp {
     fn default() -> Self {
         let (tx, rx) = mpsc::channel();
+        // --- 1. BUILD THE TRAY ICON HERE ---
+        let quit_i =
+            tray_icon::menu::MenuItem::with_id("quit_solnas", "Quit the SolNAS Client", true, None);
+        //now put in the icon
+        let icon_bytes = include_bytes!("../assets/WhereWhereYou.ico");
+        let image = image::load_from_memory(icon_bytes)
+            .expect("Failed to load tray icon")
+            .into_rgba8();
+
+        let (width, height) = image.dimensions();
+        let rgba = image.into_raw();
+        let tray_icon_image =
+            tray_icon::Icon::from_rgba(rgba, width, height).expect("Failed to format tray icon");
+        //old stuff
+        let tray_menu = tray_icon::menu::Menu::new();
+        let _ = tray_menu.append(&quit_i);
+
+        let tray_icon_instance = tray_icon::TrayIconBuilder::new()
+            .with_menu(Box::new(tray_menu))
+            .with_icon(tray_icon_image)
+            .with_tooltip("SolNAS Client Quitter")
+            .build()
+            .unwrap();
+        //now return the the defaults
         Self {
             theme: load_theme(), // Load it exactly once when the app starts
             view: ViewState::Login,
@@ -168,6 +194,9 @@ impl Default for NasClientApp {
             selected_files: HashSet::new(),
             show_config_modal: false,
             active_config: None,
+            tray_icon: Some(tray_icon_instance),
+            tray_listener_spawned: false,
+            is_hidden: false,
         }
     }
 }
@@ -176,48 +205,88 @@ impl Default for NasClientApp {
 // this implements the UI details for the dashboard and lock screen.
 impl eframe::App for NasClientApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // 1. Process any messages from background threads
+        // ==========================================
+        // 1. BACKGROUND TRAY THREAD
+        // ==========================================
+        if !self.tray_listener_spawned {
+            self.tray_listener_spawned = true;
+            let tx_clone = self.tx.clone();
+            let ctx_clone = ctx.clone();
 
-        //uses the custom style
-        let mut style = (*ctx.style()).clone();
+            std::thread::spawn(move || {
+                let tray_rx = tray_icon::TrayIconEvent::receiver();
+                let menu_rx = tray_icon::menu::MenuEvent::receiver();
 
-        style.spacing.item_spacing = egui::vec2(15.0, 15.0);
-        style.visuals.widgets.noninteractive.rounding = egui::Rounding::same(8.0);
-        style.visuals.widgets.inactive.rounding = egui::Rounding::same(8.0);
+                loop {
+                    // Right-Click Menu
+                    while let Ok(event) = menu_rx.try_recv() {
+                        if event.id.as_ref() == "quit_solnas" {
+                            std::process::exit(0);
+                        }
+                    }
 
-        ctx.set_style(style); //actually save the changes to the app
+                    // Icon Clicks
+                    while let Ok(event) = tray_rx.try_recv() {
+                        match event {
+                            tray_icon::TrayIconEvent::DoubleClick { .. }
+                            | tray_icon::TrayIconEvent::Click {
+                                button_state: tray_icon::MouseButtonState::Up,
+                                ..
+                            } => {
+                                let _ = tx_clone.send(AppMsg::RestoreWindow);
+                                ctx_clone.request_repaint(); // Jolt eframe awake
+                            }
+                            _ => {}
+                        }
+                    }
 
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+            });
+        }
+
+        // ==========================================
+        // 2. INTERCEPT THE CLOSE BUTTON (THE FIX)
+        // ==========================================
+        if ctx.input(|i| i.viewport().close_requested()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+        }
+
+        // ==========================================
+        // 3. PROCESS BACKGROUND MESSAGES
+        // ==========================================
         while let Ok(msg) = self.rx.try_recv() {
-            self.is_loading = false;
             match msg {
                 AppMsg::LoginSuccess(token) => {
+                    self.is_loading = false;
                     self.token = token;
                     self.view = ViewState::Dashboard;
                     self.status_message = "Logged in!".to_string();
-                    self.refresh_files(); // Fetch root folder immediately
+                    self.refresh_files(ctx);
                 }
-                AppMsg::LoginFailed(err) => self.status_message = err,
-                AppMsg::FilesLoaded(file_list) => self.files = file_list,
-                AppMsg::ActionSuccess(msg) => {
-                    self.status_message = msg;
+                AppMsg::LoginFailed(err) => {
                     self.is_loading = false;
-
-                    self.upload_progress = None; //this is new!
-
-                    self.refresh_files();
+                    self.status_message = err;
+                }
+                AppMsg::FilesLoaded(file_list) => {
+                    self.is_loading = false;
+                    self.files = file_list;
+                }
+                AppMsg::ActionSuccess(msg) => {
+                    self.is_loading = false;
+                    self.status_message = msg;
+                    self.upload_progress = None;
+                    self.refresh_files(ctx);
                 }
                 AppMsg::Error(err) => {
+                    self.is_loading = false;
                     self.status_message = err;
-                    self.is_loading = false; //sets the loading state
-                    self.upload_progress = None; //this kills the upload bar
+                    self.upload_progress = None;
                 }
                 AppMsg::ImageLoaded(name, color_image) => {
-                    // Send the pixels to the graphics card
-                    let texture = ctx.load_texture(
-                        &name,
-                        color_image,
-                        egui::TextureOptions::LINEAR, // Makes scaled-down thumbnails look smooth
-                    );
+                    let texture =
+                        ctx.load_texture(&name, color_image, egui::TextureOptions::LINEAR);
                     self.image_cache.insert(name, ImageState::Loaded(texture));
                 }
                 AppMsg::ImageFailed(name) => {
@@ -229,26 +298,43 @@ impl eframe::App for NasClientApp {
                 AppMsg::ConfigLoaded(config) => {
                     self.is_loading = false;
                     self.active_config = Some(config);
-                    self.show_config_modal = true; // Open the window!
+                    self.show_config_modal = true;
                     self.status_message = "✅ Config received! Opening modal...".into();
                 }
                 AppMsg::ConfigSaved => {
                     self.is_loading = false;
-                    self.show_config_modal = false; // Close the window!
+                    self.show_config_modal = false;
                     self.status_message = "Server configuration updated successfully!".into();
+                }
+
+                // --- THE CLEAN WAKE-UP LOGIC ---
+                AppMsg::RestoreWindow => {
+                    //println!("successfully contacted the frontend!");
+                    self.is_hidden = false;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
                 }
             }
         }
+
+        // ==========================================
+        // 4. DRAW THE USER INTERFACE ALWAYS
+        // ==========================================
+        let mut style = (*ctx.style()).clone();
+        style.spacing.item_spacing = egui::vec2(15.0, 15.0);
+        style.visuals.widgets.noninteractive.rounding = egui::Rounding::same(8.0);
+        style.visuals.widgets.inactive.rounding = egui::Rounding::same(8.0);
+        ctx.set_style(style);
+
         let custom_frame = egui::Frame::default()
             .fill(self.theme.background)
             .inner_margin(20.0);
 
-        // Draw the screen
         egui::CentralPanel::default()
             .frame(custom_frame)
             .show(ctx, |ui| match self.view {
                 ViewState::Login => self.render_login(ui),
-                ViewState::Dashboard => self.render_dashboard(ui),
+                ViewState::Dashboard => self.render_dashboard(ui, ctx),
             });
     }
 }
@@ -357,7 +443,7 @@ impl NasClientApp {
     /// - Lots of variables I know, but it's easier to split the color of the text from the fill of the box.
     ///
     ///
-    fn render_dashboard(&mut self, ui: &mut egui::Ui) {
+    fn render_dashboard(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let back_button_raw = egui::RichText::new("⬅ Path Back")
             .color(self.theme.text_dashboard)
             .size(20.0);
@@ -395,7 +481,7 @@ impl NasClientApp {
             ui.separator();
             // next is the server config button.
             if ui.button("⚙ Server Config").clicked() {
-                self.fetch_remote_config();
+                self.fetch_remote_config(ctx);
             }
             // now the back button.
             if !self.current_path.is_empty() {
@@ -403,14 +489,14 @@ impl NasClientApp {
                     let mut parts: Vec<&str> = self.current_path.split('/').collect();
                     parts.pop();
                     self.current_path = parts.join("/");
-                    self.refresh_files();
+                    self.refresh_files(ctx);
                 }
             }
             ui.label(egui::RichText::new(format!("/{}", self.current_path)).strong());
             //refresh button is last of the top.
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.add(refresh_button).clicked() {
-                    self.refresh_files();
+                    self.refresh_files(ctx);
                 }
             });
         });
@@ -422,7 +508,7 @@ impl NasClientApp {
             //the upload button is first.
             if ui.add(upload_button).clicked() {
                 if let Some(path) = rfd::FileDialog::new().pick_files() {
-                    self.upload_files(path);
+                    self.upload_files(path, ctx);
                 }
             }
 
@@ -436,7 +522,7 @@ impl NasClientApp {
             );
             if ui.add(folder_make_button).clicked() {
                 if !self.new_folder_name.is_empty() {
-                    self.create_folder(self.new_folder_name.clone());
+                    self.create_folder(self.new_folder_name.clone(), ctx);
                     self.new_folder_name.clear();
                 }
             }
@@ -479,7 +565,7 @@ impl NasClientApp {
                             self.selected_files.clone().into_iter().collect();
 
                         // Fire off the new batch download function
-                        self.download_multiple_files(files_to_download, save_folder);
+                        self.download_multiple_files(files_to_download, save_folder, ctx);
 
                         // Clear the checkboxes immediately so the UI resets
                         self.selected_files.clear();
@@ -528,7 +614,7 @@ impl NasClientApp {
 
                                 if self.item_pending_deletion.as_deref() == Some(&file.name) {
                                     // SECOND CLICK: Execute the actual delete function
-                                    self.delete_item(&file.name);
+                                    self.delete_item(&file.name, ctx);
 
                                     // Clear the state and the message
                                     self.item_pending_deletion = None;
@@ -551,7 +637,7 @@ impl NasClientApp {
                                     self.current_path =
                                         format!("{}/{}", self.current_path, file.name);
                                 }
-                                self.refresh_files();
+                                self.refresh_files(ctx);
                             }
                             ui.add_space(20.0);
                             if ui.add(folder_move_button).clicked() {
@@ -593,7 +679,7 @@ impl NasClientApp {
                                 }
                                 None => {
                                     // We haven't asked for this image yet! Queue it up and show a spinner for now.
-                                    self.fetch_preview(file.name.clone());
+                                    self.fetch_preview(file.name.clone(), ctx);
                                     ui.spinner();
                                 }
                             }
@@ -635,7 +721,7 @@ impl NasClientApp {
                                 //file deletion improved logic
                                 if self.item_pending_deletion.as_deref() == Some(&file.name) {
                                     // SECOND CLICK: Execute the actual delete function
-                                    self.delete_item(&file.name);
+                                    self.delete_item(&file.name, ctx);
 
                                     // Clear the state and the message
                                     self.item_pending_deletion = None;
@@ -655,7 +741,7 @@ impl NasClientApp {
                                 if let Some(save_path) =
                                     rfd::FileDialog::new().set_file_name(&file.name).save_file()
                                 {
-                                    self.download_file(&file.name, save_path);
+                                    self.download_file(&file.name, save_path, ctx);
                                 }
                             }
                             // For Files:
@@ -742,7 +828,7 @@ impl NasClientApp {
                                 format!("{}/{}", self.current_path, item_name)
                             };
 
-                            self.move_item(source, self.move_target_folder.clone(), item_name);
+                            self.move_item(source, self.move_target_folder.clone(), item_name, ctx);
 
                             self.moving_item = None;
                             self.move_target_folder.clear();
@@ -810,7 +896,7 @@ impl NasClientApp {
             // 4. Safely outside the closure, the borrow is dropped, so we can freely use `self` again!
             if trigger_save {
                 if let Some(config) = self.active_config.clone() {
-                    self.save_remote_config(config);
+                    self.save_remote_config(config, ctx);
                 }
             }
 
@@ -821,36 +907,66 @@ impl NasClientApp {
     }
 
     // This is where all of the network functions are called.
-
-    fn refresh_files(&mut self) {
+    //-----------------------------------------------------------------------------
+    /// Logic for a button that refreshes the file list.
+    /// This had an error where there is no error handling for expired sessions, causing a bloat of messages.
+    fn refresh_files(&mut self, ctx: &egui::Context) {
         self.is_loading = true;
         let tx = self.tx.clone();
+        let ctx_clone = ctx.clone();
         let ip = self.ip_input.clone();
         let token = self.token.clone();
         let path = self.current_path.clone();
 
-        thread::spawn(move || {
+        std::thread::spawn(move || {
             let client = HTTP_CLIENT.clone();
             let url = format!("https://{}:8080/api/files?path={}", ip, path);
+
             match client.get(&url).bearer_auth(token).send() {
-                Ok(res) => {
-                    if let Ok(data) = res.json::<ListResponse>() {
-                        tx.send(AppMsg::FilesLoaded(data.files)).unwrap();
+                Ok(res) if res.status().is_success() => {
+                    // Status is 200 OK. Try to parse the files.
+                    match res.json::<ListResponse>() {
+                        Ok(data) => {
+                            let _ = tx.send(AppMsg::FilesLoaded(data.files));
+                        }
+                        Err(_) => {
+                            let _ = tx.send(AppMsg::Error("Failed to read server data.".into()));
+                        }
                     }
                 }
-                Err(_) => tx
-                    .send(AppMsg::Error("Failed to fetch files".into()))
-                    .unwrap(),
+                Ok(res) if res.status() == 401 => {
+                    // Token expired! Explicitly kick them to the error state.
+                    let _ = tx.send(AppMsg::Error(
+                        "Session expired. Please log in again.".into(),
+                    ));
+                }
+                Ok(res) => {
+                    // Catch-all for other server errors (404 Not Found, 500 Internal Server Error)
+                    let _ = tx.send(AppMsg::Error(format!(
+                        "Server returned error code: {}",
+                        res.status()
+                    )));
+                }
+                Err(_) => {
+                    // Complete network failure (server offline, no wifi)
+                    let _ = tx.send(AppMsg::Error("Network connection failed.".into()));
+                }
             }
+
+            // CRITICAL: Unconditionally wake up egui!
+            // Placing this outside the match block guarantees that no matter what the refresh WILL be called.
+            // Even if the server returns an error, we still want to wake up egui so it can show the error message.
+            ctx_clone.request_repaint();
         });
     }
 
-    fn upload_files(&mut self, file_paths: Vec<PathBuf>) {
+    fn upload_files(&mut self, file_paths: Vec<PathBuf>, ctx: &egui::Context) {
         self.is_loading = true;
         self.upload_progress = Some(0.0);
         self.status_message = format!("Uploading {} file(s)...", file_paths.len());
 
         let tx = self.tx.clone();
+        let ctx_clone = ctx.clone();
         let ip = self.ip_input.clone();
         let token = self.token.clone();
         let current_path = self.current_path.clone();
@@ -941,14 +1057,17 @@ impl NasClientApp {
 
             // All files finished!
             let _ = tx.send(AppMsg::ActionSuccess("Upload complete!".into()));
+            ctx_clone.request_repaint();
         });
         self.upload_progress = Some(0.0);
     }
 
-    fn download_file(&mut self, filename: &str, save_path: PathBuf) {
+    fn download_file(&mut self, filename: &str, save_path: PathBuf, ctx: &egui::Context) {
         self.is_loading = true;
         self.status_message = "Downloading...".into();
+
         let tx = self.tx.clone();
+        let ctx_clone = ctx.clone();
         let ip = self.ip_input.clone();
         let token = self.token.clone();
         let full_remote_path = if self.current_path.is_empty() {
@@ -971,6 +1090,7 @@ impl NasClientApp {
                 }
                 Err(_) => tx.send(AppMsg::Error("Download failed".into())).unwrap(),
             }
+            ctx_clone.request_repaint();
         });
     }
     ///## Fetch Preview
@@ -978,12 +1098,13 @@ impl NasClientApp {
     /// - A cute little function that gives a preview of the picture
     /// - probably won't work for odd picture formats or Gifs.
     ///
-    fn fetch_preview(&mut self, filename: String) {
+    fn fetch_preview(&mut self, filename: String, ctx: &egui::Context) {
         // Mark it as loading so we don't spawn 100 threads for the same image
         self.image_cache
             .insert(filename.clone(), ImageState::Loading);
 
         let tx = self.tx.clone();
+        let ctx_clone = ctx.clone();
         let ip = self.ip_input.clone();
         let token = self.token.clone();
 
@@ -993,7 +1114,7 @@ impl NasClientApp {
             format!("{}/{}", self.current_path, filename)
         };
 
-        thread::spawn(move || {
+        std::thread::spawn(move || {
             let client = HTTP_CLIENT.clone();
             let url = format!(
                 "https://{}:8080/api/download/{}?preview=true",
@@ -1001,27 +1122,39 @@ impl NasClientApp {
             );
 
             if let Ok(res) = client.get(&url).bearer_auth(token).send() {
-                if let Ok(bytes) = res.bytes() {
-                    // Decode the raw web bytes into a dynamic image
-                    if let Ok(img) = image::load_from_memory(&bytes) {
-                        let size = [img.width() as _, img.height() as _];
-                        let image_buffer = img.to_rgba8();
-                        let pixels = image_buffer.as_flat_samples();
+                // Ensure we got a 200 OK before we try to parse bytes
+                if res.status().is_success() {
+                    if let Ok(bytes) = res.bytes() {
+                        // Decode the raw web bytes into a dynamic image
+                        if let Ok(img) = image::load_from_memory(&bytes) {
+                            // THE OPTIMIZATION:
+                            // Instantly scale the image down to a maximum of 256x256 pixels.
+                            // This preserves aspect ratio but mathematically guarantees the
+                            // RGBA buffer and GPU texture will never exceed ~250KB per image!
+                            let thumb = img.thumbnail(128, 128);
 
-                        // Convert to egui's specific color format
-                        let color_image =
-                            egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
+                            let size = [thumb.width() as _, thumb.height() as _];
+                            let image_buffer = thumb.to_rgba8();
+                            let pixels = image_buffer.as_flat_samples();
 
-                        tx.send(AppMsg::ImageLoaded(filename, color_image)).unwrap();
-                        return;
+                            // Convert to egui's specific color format
+                            let color_image =
+                                egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
+
+                            // Safely send the much smaller image back to the main thread
+                            let _ = tx.send(AppMsg::ImageLoaded(filename, color_image));
+                            ctx_clone.request_repaint();
+                            return;
+                        }
                     }
                 }
             }
-            // If anything fails (network error, bad image file), mark it as failed
-            tx.send(AppMsg::ImageFailed(filename)).unwrap();
+            // If anything fails, safely send the failure message without panicking
+            let _ = tx.send(AppMsg::ImageFailed(filename));
+            ctx_clone.request_repaint();
         });
     }
-    fn create_folder(&mut self, folder_name: String) {
+    fn create_folder(&mut self, folder_name: String, ctx: &egui::Context) {
         if self
             .files
             .iter()
@@ -1034,6 +1167,7 @@ impl NasClientApp {
         } //Prevent the issue that Jakob talked about.
         self.is_loading = true;
         let tx = self.tx.clone();
+        let ctx_clone = ctx.clone();
         let ip = self.ip_input.clone();
         let token = self.token.clone();
         let full_path = if self.current_path.is_empty() {
@@ -1057,12 +1191,20 @@ impl NasClientApp {
                 tx.send(AppMsg::ActionSuccess("Folder created".into()))
                     .unwrap();
             }
+            ctx_clone.request_repaint();
         });
     }
 
-    fn move_item(&mut self, source_path: String, destination_folder: String, file_name: String) {
+    fn move_item(
+        &mut self,
+        source_path: String,
+        destination_folder: String,
+        file_name: String,
+        ctx: &egui::Context,
+    ) {
         self.is_loading = true;
         let tx = self.tx.clone();
+        let ctx_clone = ctx.clone();
         let ip = self.ip_input.clone();
         let token = self.token.clone();
 
@@ -1094,12 +1236,14 @@ impl NasClientApp {
                     .send(AppMsg::Error(format!("Network error: {}", e)))
                     .unwrap(),
             }
+            ctx_clone.request_repaint(); // new!
         });
     }
 
-    fn delete_item(&mut self, item_name: &str) {
+    fn delete_item(&mut self, item_name: &str, ctx: &egui::Context) {
         self.is_loading = true;
         let tx = self.tx.clone();
+        let ctx_clone = ctx.clone();
         let ip = self.ip_input.clone();
         let token = self.token.clone();
         let full_path = if self.current_path.is_empty() {
@@ -1122,15 +1266,22 @@ impl NasClientApp {
             {
                 tx.send(AppMsg::ActionSuccess("Deleted successfully".into()))
                     .unwrap();
+                ctx_clone.request_repaint();
             }
         });
     }
     // New Stuff 7/6/2026
-    fn download_multiple_files(&mut self, files: Vec<String>, save_folder: std::path::PathBuf) {
+    fn download_multiple_files(
+        &mut self,
+        files: Vec<String>,
+        save_folder: std::path::PathBuf,
+        ctx: &egui::Context,
+    ) {
         self.is_loading = true;
         self.status_message = format!("Downloading {} files...", files.len());
 
         let tx = self.tx.clone();
+        let ctx_clone = ctx.clone(); //new
         let ip = self.ip_input.clone();
         let token = self.token.clone();
         let current_path = self.current_path.clone();
@@ -1149,7 +1300,7 @@ impl NasClientApp {
 
                 let url = format!("https://{}:8080/api/download/{}", ip, full_path);
 
-                // Construct the exact local file path (e.g., C:\Users\You\Downloads\report.pdf)
+                // Construct the exact local file path C:\Users\You\Downloads\report.pdf
                 let target_file_path = save_folder.join(filename);
 
                 // Fetch the file from the server
@@ -1165,11 +1316,14 @@ impl NasClientApp {
 
             // All files finished!
             let _ = tx.send(AppMsg::ActionSuccess("Batch download complete!".into()));
+            ctx_clone.request_repaint();
         });
     }
-    fn fetch_remote_config(&mut self) {
+    //I am not going to merge the two download functions, that's a lot of change to server and the client.
+    fn fetch_remote_config(&mut self, ctx: &egui::Context) {
         self.is_loading = true;
         let tx = self.tx.clone();
+        let ctx_clone = ctx.clone();
         let ip = self.ip_input.clone();
         let token = self.token.clone();
 
@@ -1189,6 +1343,7 @@ impl NasClientApp {
                                 match serde_json::from_str::<AppConfig>(&raw_text) {
                                     Ok(config) => {
                                         let _ = tx.send(AppMsg::ConfigLoaded(config));
+                                        ctx_clone.request_repaint();
                                     }
                                     Err(e) => {
                                         // Tell the UI that the JSON didn't match our struct
@@ -1222,9 +1377,10 @@ impl NasClientApp {
         });
     }
 
-    fn save_remote_config(&mut self, new_config: AppConfig) {
+    fn save_remote_config(&mut self, new_config: AppConfig, ctx: &egui::Context) {
         self.is_loading = true;
         let tx = self.tx.clone();
+        let ctx_clone = ctx.clone();
         let ip = self.ip_input.clone();
         let token = self.token.clone();
 
@@ -1240,6 +1396,7 @@ impl NasClientApp {
                 .is_ok()
             {
                 let _ = tx.send(AppMsg::ConfigSaved);
+                ctx_clone.request_repaint();
             } else {
                 let _ = tx.send(AppMsg::Error("Failed to save server configuration.".into()));
             }
@@ -1248,6 +1405,7 @@ impl NasClientApp {
 }
 
 // --- Config Helpers ---
+/// This is the config for the IP number input at the start so you don't need to type it a ton.
 fn load_config() -> String {
     std::fs::read_to_string(CONFIG_FILE)
         .unwrap_or_default()
@@ -1255,7 +1413,7 @@ fn load_config() -> String {
         .find_map(|line| line.strip_prefix("NAS_IP=").map(|s| s.trim().to_string()))
         .unwrap_or_default()
 }
-
+/// This saves the config of the IP as NAS_IP
 fn save_config(ip: &str) {
     let _ = std::fs::write(CONFIG_FILE, format!("NAS_IP={}\n", ip));
 }
@@ -1363,3 +1521,10 @@ fn main() {
         Box::new(|_cc| Box::new(NasClientApp::default()) as Box<dyn eframe::App>),
     );
 }
+
+//Memory Update Part Two.
+// When in idle, the RAM slowly bloats with lots of requests.
+// To fix this, we need to clear the request queue until something actually happens.
+// let ctx_clone = ctx.clone(); // <--- Clone the UI context! (add after tx and before ip)
+// and in parts saying if res.status().is_success()  add " ctx_clone.update(); " to the bottom to refresh the UI.
+// ' ctx: &egui::Context ' needs to be added to the function signature
