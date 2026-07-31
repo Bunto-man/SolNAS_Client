@@ -153,7 +153,7 @@ impl Default for NasClientApp {
         let quit_i =
             tray_icon::menu::MenuItem::with_id("quit_solnas", "Quit the SolNAS Client", true, None);
         //now put in the icon
-        let icon_bytes = include_bytes!("../assets/QuitIcon.ico");
+        let icon_bytes = include_bytes!("../Assets/QuitIcon.ico");
         let image = image::load_from_memory(icon_bytes)
             .expect("Failed to load tray icon")
             .into_rgba8();
@@ -1519,6 +1519,14 @@ fn load_theme() -> AppTheme {
 
 // --- Main Entry ---
 fn main() {
+    // 1. Wake up GTK for the system tray (Linux only!)
+    #[cfg(target_os = "linux")]
+    {
+        if let Err(err) = gtk::init() {
+            eprintln!("Failed to initialize GTK: {}", err);
+        }
+    }
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1000.0, 900.0])
