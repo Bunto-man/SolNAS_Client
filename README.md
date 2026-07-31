@@ -70,3 +70,24 @@ cargo build --release
 - Each of the colors are stored in hexadecimal, replace the colors and re-run the program.
 
 `Google 'hex color' , choose your colors, copy and paste. Voila.`
+
+### The Ram Update Fix
+
+The RAM update brought an issue with dependencies, so those who are on linux may need to install new dependencies. 
+
+These are the dependencies that need to be installed:
+
+```
+sudo apt update && sudo apt install libx11-dev libxcursor-dev libxrandr-dev libxi-dev libvulkan-dev libwayland-dev libxkbcommon-dev libdbus-1-dev libxdo-dev
+```
+
+---
+
+**These are only needed because of a change I made to the way the app works**
+
+#### Read this!:
+
+**The app will *NOT* close upon pressing the close button. You must either kill the process or use the system tray icon to close it.**
+
+This change prevents the app from closing, obviously, since I personally do it out of habit.
+The app should stay open. It uses only about 80MB of RAM (on windows) without any images loaded.
