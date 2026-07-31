@@ -76,12 +76,12 @@ enum AppMsg {
     ActionSuccess(String), // Used for upload/delete/create success
     Error(String),
     UploadProgress(f32), //for the upload status
-
     ImageLoaded(String, egui::ColorImage),
     ImageFailed(String),
     ConfigLoaded(AppConfig),
     ConfigSaved,
     RestoreWindow,
+    SessionExpired, // New as of 7/30/2026
 }
 enum ImageState {
     Loading,
@@ -140,7 +140,7 @@ struct NasClientApp {
     show_config_modal: bool,
     active_config: Option<AppConfig>,
 
-    tray_icon: Option<TrayIcon>,
+    tray_icon: Option<TrayIcon>, // figure out how to kill this warning.
     tray_listener_spawned: bool,
     is_hidden: bool,
 }
@@ -153,7 +153,7 @@ impl Default for NasClientApp {
         let quit_i =
             tray_icon::menu::MenuItem::with_id("quit_solnas", "Quit the SolNAS Client", true, None);
         //now put in the icon
-        let icon_bytes = include_bytes!("../assets/WhereWhereYou.ico");
+        let icon_bytes = include_bytes!("../assets/QuitIcon.ico");
         let image = image::load_from_memory(icon_bytes)
             .expect("Failed to load tray icon")
             .into_rgba8();
@@ -188,7 +188,7 @@ impl Default for NasClientApp {
             is_loading: false,
             moving_item: None,
             move_target_folder: String::new(),
-            item_pending_deletion: None, //new
+            item_pending_deletion: None,
             image_cache: std::collections::HashMap::new(),
             upload_progress: None, //don't forget the defaults.
             selected_files: HashSet::new(),
@@ -314,6 +314,18 @@ impl eframe::App for NasClientApp {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
                     ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
                 }
+                // -- The session booting the user out to login
+                AppMsg::SessionExpired => {
+                    self.is_loading = false;
+                    self.token.clear(); // Nuke the dead token
+                    self.files.clear(); // Wipe the directory list
+                    self.image_cache.clear(); // Free up the RAM
+
+                    // THIS IS THE FIX: Physically kick them back to the login screen
+                    self.view = ViewState::Login;
+
+                    self.status_message = "Session expired. Please log in again.".into();
+                }
             }
         }
 
@@ -434,7 +446,7 @@ impl NasClientApp {
 
         if !self.status_message.is_empty() {
             ui.add_space(10.0);
-            ui.label(egui::RichText::new(&self.status_message).color(egui::Color32::BLACK));
+            ui.label(egui::RichText::new(&self.status_message).color(self.theme.text_dashboard));
         }
     }
     /// # Render dashboard
@@ -663,7 +675,7 @@ impl NasClientApp {
                             // Check our cache
                             match self.image_cache.get(&file.name) {
                                 Some(ImageState::Loaded(texture)) => {
-                                    // Draw the thumbnail! (Restricted to 32x32 pixels, with slightly rounded corners)
+                                    // Draw the thumbnail!
                                     ui.add(
                                         egui::Image::new(texture)
                                             .max_width(64.0)
@@ -842,8 +854,7 @@ impl NasClientApp {
                 });
         }
 
-        // 2. THE SERVER CONFIG MODAL (Completely independent)
-
+        // 2. THE SERVER CONFIG MODAL
         if self.show_config_modal {
             let mut trigger_save = false;
             let mut close_modal = false;
@@ -857,7 +868,7 @@ impl NasClientApp {
                     if let Some(config) = &mut self.active_config {
                         ui.label("Max Upload Size:");
 
-                        // 1. Convert the backend's bytes into a Megabyte decimal
+                        // Convert the backend's bytes into a Megabyte decimal
                         let mut size_in_mb = config.max_upload_size as f64 / 1_048_576.0;
 
                         // 2. Draw the DragValue using the MB variable
@@ -882,7 +893,7 @@ impl NasClientApp {
                         ui.add_space(20.0);
 
                         ui.horizontal(|ui| {
-                            // 3. We ONLY flip the booleans inside the closure. No `self` calls here!
+                            // ONLY flip the booleans inside the closure. No `self` calls here
                             if ui.button("Save & Apply").clicked() {
                                 trigger_save = true;
                             }
@@ -893,7 +904,7 @@ impl NasClientApp {
                     }
                 });
 
-            // 4. Safely outside the closure, the borrow is dropped, so we can freely use `self` again!
+            // Safely outside the closure, the borrow is dropped, so we can freely use `self` again!
             if trigger_save {
                 if let Some(config) = self.active_config.clone() {
                     self.save_remote_config(config, ctx);
@@ -936,9 +947,7 @@ impl NasClientApp {
                 }
                 Ok(res) if res.status() == 401 => {
                     // Token expired! Explicitly kick them to the error state.
-                    let _ = tx.send(AppMsg::Error(
-                        "Session expired. Please log in again.".into(),
-                    ));
+                    let _ = tx.send(AppMsg::SessionExpired);
                 }
                 Ok(res) => {
                     // Catch-all for other server errors (404 Not Found, 500 Internal Server Error)
@@ -949,7 +958,7 @@ impl NasClientApp {
                 }
                 Err(_) => {
                     // Complete network failure (server offline, no wifi)
-                    let _ = tx.send(AppMsg::Error("Network connection failed.".into()));
+                    let _ = tx.send(AppMsg::Error("Network connection failed :(.".into()));
                 }
             }
 
@@ -1097,6 +1106,7 @@ impl NasClientApp {
     ///
     /// - A cute little function that gives a preview of the picture
     /// - probably won't work for odd picture formats or Gifs.
+    /// - Been tweaked many times for its impact on the app's ram usage (high)
     ///
     fn fetch_preview(&mut self, filename: String, ctx: &egui::Context) {
         // Mark it as loading so we don't spawn 100 threads for the same image
@@ -1128,19 +1138,22 @@ impl NasClientApp {
                         // Decode the raw web bytes into a dynamic image
                         if let Ok(img) = image::load_from_memory(&bytes) {
                             // THE OPTIMIZATION:
-                            // Instantly scale the image down to a maximum of 256x256 pixels.
-                            // This preserves aspect ratio but mathematically guarantees the
-                            // RGBA buffer and GPU texture will never exceed ~250KB per image!
-                            let thumb = img.thumbnail(128, 128);
-
+                            // Instantly scale the image down to a maximum of 64x64 pixels.
+                            // drop the bytes before decoding to save memory
+                            drop(bytes);
+                            let thumb = img.thumbnail(64, 64);
+                            // try to optimize the RAM use even further?
+                            drop(img);
                             let size = [thumb.width() as _, thumb.height() as _];
                             let image_buffer = thumb.to_rgba8();
+                            drop(thumb);
                             let pixels = image_buffer.as_flat_samples();
 
                             // Convert to egui's specific color format
                             let color_image =
                                 egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
-
+                            //now the color is saved, so drop the size and the pixels?
+                            drop(pixels);
                             // Safely send the much smaller image back to the main thread
                             let _ = tx.send(AppMsg::ImageLoaded(filename, color_image));
                             ctx_clone.request_repaint();
@@ -1164,7 +1177,7 @@ impl NasClientApp {
             self.status_message =
                 format!("Cannot create folder: '{}' already exists ☆☆☆", folder_name);
             return;
-        } //Prevent the issue that Jakob talked about.
+        } //Prevent the issue that Jakob talked about, where folders with the same name overwrite.
         self.is_loading = true;
         let tx = self.tx.clone();
         let ctx_clone = ctx.clone();
@@ -1188,7 +1201,7 @@ impl NasClientApp {
                 .send()
                 .is_ok()
             {
-                tx.send(AppMsg::ActionSuccess("Folder created".into()))
+                tx.send(AppMsg::ActionSuccess("☆ Folder created ☆".into()))
                     .unwrap();
             }
             ctx_clone.request_repaint();
@@ -1226,7 +1239,7 @@ impl NasClientApp {
 
             match client.post(&url).bearer_auth(token).json(&payload).send() {
                 Ok(res) if res.status().is_success() => {
-                    tx.send(AppMsg::ActionSuccess("Item moved successfully!".into()))
+                    tx.send(AppMsg::ActionSuccess("Item moved successfully! ☆☆☆".into()))
                         .unwrap();
                 }
                 Ok(_) => tx
@@ -1288,7 +1301,6 @@ impl NasClientApp {
 
         std::thread::spawn(move || {
             let client = HTTP_CLIENT.clone();
-            //let total_files = files.len();
             //total_files and index are only useful for tracking downloads. This doesn't exist yet.
             for (_index, filename) in files.iter().enumerate() {
                 // Determine the correct server path
@@ -1510,7 +1522,7 @@ fn main() {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1000.0, 900.0])
-            .with_title("SolNAS Client App")
+            .with_title("SolNAS Client")
             .with_transparent(true), //allow transparency
         ..Default::default()
     };
