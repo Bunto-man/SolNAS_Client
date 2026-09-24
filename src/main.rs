@@ -1140,25 +1140,20 @@ impl NasClientApp {
                 if res.status().is_success() {
                     if let Ok(bytes) = res.bytes() {
                         // Decode the raw web bytes into a dynamic image
+                        //now with the fix this is different.
                         if let Ok(img) = image::load_from_memory(&bytes) {
-                            // THE OPTIMIZATION:
-                            // Instantly scale the image down to a maximum of 64x64 pixels.
-                            // drop the bytes before decoding to save memory
-                            drop(bytes);
-                            let thumb = img.thumbnail(64, 64);
-                            // try to optimize the RAM use even further?
-                            drop(img);
-                            let size = [thumb.width() as _, thumb.height() as _];
-                            let image_buffer = thumb.to_rgba8();
-                            drop(thumb);
+                            // The bytes are now a tiny thumbnail from the server!
+                            let size = [img.width() as _, img.height() as _];
+                            let image_buffer = img.to_rgba8();
                             let pixels = image_buffer.as_flat_samples();
 
                             // Convert to egui's specific color format
-                            let color_image =
-                                egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
-                            //now the color is saved, so drop the size and the pixels?
-                            drop(pixels);
-                            // Safely send the much smaller image back to the main thread
+                            let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                                size, 
+                                pixels.as_slice()
+                            );
+                            
+                            // Safely send the lightweight image back to the main thread
                             let _ = tx.send(AppMsg::ImageLoaded(filename, color_image));
                             ctx_clone.request_repaint();
                             return;
@@ -1166,11 +1161,13 @@ impl NasClientApp {
                     }
                 }
             }
+            
             // If anything fails, safely send the failure message without panicking
             let _ = tx.send(AppMsg::ImageFailed(filename));
             ctx_clone.request_repaint();
         });
     }
+
     fn create_folder(&mut self, folder_name: String, ctx: &egui::Context) {
         if self
             .files
