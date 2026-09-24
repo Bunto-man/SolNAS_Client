@@ -1,0 +1,109 @@
+Here are some templates to use in the client!
+Simply copy paste them into the style.ini file after running the program.
+
+
+PinkPig: 
+
+
+[Colors]
+background = #fffff2
+Text_Primary = #000000
+Text_dashboard = #000000
+text_title =     #f535c5
+list_txt =        #f535c5
+download_btn = #f535c5
+upload_btn = #f535c5
+delete_btn = #dc3545
+move_btn = #df8054
+logout_btn = #f535c5
+connect_btn = #c183ce
+open_btn = #f535c5
+refresh_btn = #f535c5
+path_btn = #df8054
+folder_btn = #f535c5
+
+
+Powerline:
+
+
+[Colors]
+background = #252525
+Text_Primary = #b4b4b4
+Text_dashboard = #b4b4b4
+text_title =     #35a8f5
+list_txt =        #75c5fa
+download_btn = #3548f5
+upload_btn = #3548f5
+delete_btn = #2a8500
+move_btn = #c45522
+logout_btn = #3548f5
+connect_btn = #3548f5
+open_btn = #3548f5
+refresh_btn = #3548f5
+path_btn = #1b4a69
+folder_btn = #12184b
+
+
+Defaultio (Ugly Purple):
+
+
+[Colors]
+background = #250444
+Text_Primary = #000000
+Text_dashboard = #FFFFFF
+text_title =     #FFFFFF
+list_txt =        #e6e4e7
+download_btn = #28a792
+upload_btn = #ac5ddc
+delete_btn = #dc3545
+move_btn = #f07d12
+logout_btn = #ac5ddc
+connect_btn = #fcba00
+open_btn = #ac5ddc
+refresh_btn = #ac5ddc
+path_btn = #5ddcab
+folder_btn = #ac5ddc
+
+
+Rainbow Light:
+
+[Colors]
+background = #f1ecf7
+Text_Primary = #111111
+Text_dashboard = #0f0f0f
+text_title =     #3f6600
+list_txt =        #0c0c0c
+download_btn = #4b4eff
+upload_btn = #d30909
+delete_btn = #ff91a1
+move_btn = #f07d12
+logout_btn = #ffd902
+connect_btn = #fcba00
+open_btn = #848cff
+refresh_btn = #38b84d
+path_btn = #5ddcab
+folder_btn = #d32000
+
+
+Rainbow Dark:
+
+
+[Colors]
+background = #252525
+Text_Primary = #0f0f0f
+Text_dashboard = #f1ecf7
+text_title =     #88dd00
+list_txt =        #f1ecf7
+download_btn = #4b4eff
+upload_btn = #d30909
+delete_btn = #ff91a1
+move_btn = #f07d12
+logout_btn = #9e6805
+connect_btn = #0021db
+open_btn = #848cff
+refresh_btn = #38b84d
+path_btn = #5ddcab
+folder_btn = #d32000
+
+
+

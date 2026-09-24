@@ -56,6 +56,7 @@ struct AppTheme {
     text_primary: egui::Color32,
     text_dashboard: egui::Color32,
     text_title: egui::Color32,
+    list_txt: egui::Color32,
     download_btn: egui::Color32,
     upload_btn: egui::Color32,
     delete_btn: egui::Color32,
@@ -66,6 +67,7 @@ struct AppTheme {
     refresh_btn: egui::Color32,
     path_btn: egui::Color32,
     folder_btn: egui::Color32,
+    
 } //add onto these as you need to.
 //------------------------------------------------------------------------------------------
 // --- Background Worker Messages ---
@@ -382,14 +384,14 @@ impl NasClientApp {
         });
 
         ui.vertical_centered(|ui| {
-            ui.label(egui::RichText::new("NAS IP Address:").strong().size(24.0));
+            ui.label(egui::RichText::new("NAS IP Address:").strong().size(24.0).color(self.theme.text_dashboard));
 
             ui.add(
                 egui::TextEdit::singleline(&mut self.ip_input) // change the size of the text bar
                     .font(egui::FontId::proportional(24.0)),
             );
             ui.add_space(10.0);
-            ui.label(egui::RichText::new("Password:").strong().size(24.0));
+            ui.label(egui::RichText::new("Password:").strong().size(24.0).color(self.theme.text_dashboard));
 
             ui.add(
                 egui::TextEdit::singleline(&mut self.password_input) // change the size of the text bar
@@ -475,7 +477,7 @@ impl NasClientApp {
         let refresh_raw = egui::RichText::new("🔄 Refresh")
             .color(self.theme.text_dashboard)
             .size(16.0);
-        let refresh_button = egui::Button::new(refresh_raw).fill(self.theme.folder_btn);
+        let refresh_button = egui::Button::new(refresh_raw).fill(self.theme.refresh_btn);
 
         let logout_raw = egui::RichText::new("Log Out")
             .color(self.theme.text_dashboard)
@@ -504,7 +506,7 @@ impl NasClientApp {
                     self.refresh_files(ctx);
                 }
             }
-            ui.label(egui::RichText::new(format!("/{}", self.current_path)).strong());
+            ui.label(egui::RichText::new(format!("/{}", self.current_path)).strong().color(self.theme.list_txt));
             //refresh button is last of the top.
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.add(refresh_button).clicked() {
@@ -554,7 +556,7 @@ impl NasClientApp {
 
         // System Status / Errors
         if !self.status_message.is_empty() {
-            ui.label(egui::RichText::new(&self.status_message).color(self.theme.text_dashboard));
+            ui.label(egui::RichText::new(&self.status_message).color(self.theme.list_txt));
             ui.separator();
         }
 
@@ -596,12 +598,13 @@ impl NasClientApp {
             for file in self.files.clone() {
                 ui.horizontal(|ui| {
                     if file.is_dir {
-                        ui.label(egui::RichText::new("📁").font(egui::FontId::proportional(24.0)));
+                        ui.label(egui::RichText::new("📁").font(egui::FontId::proportional(24.0)).color(self.theme.list_txt));
 
                         ui.label(
                             egui::RichText::new(&file.name)
                                 .strong()
-                                .font(egui::FontId::proportional(24.0)),
+                                .font(egui::FontId::proportional(24.0))
+                                .color(self.theme.list_txt),
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let folder_delete_button_raw = egui::RichText::new("🗑 delete")
@@ -698,14 +701,15 @@ impl NasClientApp {
                         } else {
                             // Standard file icon for PDFs, TXTs, etc.
                             ui.label(
-                                egui::RichText::new("📄").font(egui::FontId::proportional(24.0)),
+                                egui::RichText::new("📄").font(egui::FontId::proportional(24.0)).color(self.theme.list_txt),
                             );
                         }
 
                         ui.label(
                             egui::RichText::new(&file.name)
                                 .strong()
-                                .font(egui::FontId::proportional(24.0)),
+                                .font(egui::FontId::proportional(24.0))
+                                .color(self.theme.list_txt),
                         );
 
                         let mb = file.size as f64 / 1_048_576.0;
@@ -1445,6 +1449,7 @@ fn load_theme() -> AppTheme {
         text_primary: egui::Color32::BLACK,
         text_dashboard: egui::Color32::WHITE,
         text_title: egui::Color32::from_hex("#FFFFFF").unwrap(),
+        list_txt: egui::Color32::from_hex("#000000").unwrap(),
         download_btn: egui::Color32::from_hex("#28a792").unwrap(),
         upload_btn: egui::Color32::from_hex("#ac5ddc").unwrap(),
         delete_btn: egui::Color32::from_hex("#dc3545").unwrap(),
@@ -1460,20 +1465,21 @@ fn load_theme() -> AppTheme {
     if !std::path::Path::new(STYLE_FILE).exists() {
         println!("Style file not found. Creating {}...", STYLE_FILE);
         let default_ini = "[Colors]\n\
-                           Background = #250444\n\
+                           background = #250444\n\
                            Text_Primary = #000000\n\
                            Text_dashboard = #FFFFFF\n\
                            text_title =     #FFFFFF\n\
-                           Download_Button = #28a792\n\
+                           list_txt =        #e6e4e7\n\
+                           download_btn = #28a792\n\
                            upload_btn = #ac5ddc\n\
-                           Delete_Button = #dc3545\n\
+                           delete_btn = #dc3545\n\
                            move_btn = #f07d12\n\
                            logout_btn = #ac5ddc\n\
                            connect_btn = #fcba00\n\
                            open_btn = #ac5ddc\n\
                            refresh_btn = #ac5ddc\n\
                            path_btn = #5ddcab\n\
-                           folder_button = #ac5ddc";
+                           folder_btn = #ac5ddc";
         let _ = std::fs::write(STYLE_FILE, default_ini);
         return theme; // Return the defaults since we just created the file
     }
@@ -1497,17 +1503,19 @@ fn load_theme() -> AppTheme {
                         theme.text_dashboard = parse_hex(hex_val, theme.text_dashboard)
                     }
                     "text_title" => theme.text_title = parse_hex(hex_val, theme.text_title),
-                    "download_button" => {
+                    "list_txt" => theme.list_txt = parse_hex(hex_val, theme.list_txt ),
+                    "download_btn" => {
                         theme.download_btn = parse_hex(hex_val, theme.download_btn)
                     }
-                    "upload_button" => theme.upload_btn = parse_hex(hex_val, theme.upload_btn),
-                    "delete_button" => theme.delete_btn = parse_hex(hex_val, theme.delete_btn),
-                    "move_button" => theme.move_btn = parse_hex(hex_val, theme.move_btn),
-                    "logout_button" => theme.logout_btn = parse_hex(hex_val, theme.logout_btn),
-                    "connect_button" => theme.connect_btn = parse_hex(hex_val, theme.connect_btn),
-                    "open_button" => theme.open_btn = parse_hex(hex_val, theme.open_btn),
-                    "refresh_button" => theme.refresh_btn = parse_hex(hex_val, theme.refresh_btn),
-                    "path_button" => theme.path_btn = parse_hex(hex_val, theme.path_btn),
+                    "upload_btn" => theme.upload_btn = parse_hex(hex_val, theme.upload_btn),
+                    "delete_btn" => theme.delete_btn = parse_hex(hex_val, theme.delete_btn),
+                    "move_btn" => theme.move_btn = parse_hex(hex_val, theme.move_btn),
+                    "logout_btn" => theme.logout_btn = parse_hex(hex_val, theme.logout_btn),
+                    "connect_btn" => theme.connect_btn = parse_hex(hex_val, theme.connect_btn),
+                    "open_btn" => theme.open_btn = parse_hex(hex_val, theme.open_btn),
+                    "refresh_btn" => theme.refresh_btn = parse_hex(hex_val, theme.refresh_btn),
+                    "path_btn" => theme.path_btn = parse_hex(hex_val, theme.path_btn),
+                    "folder_btn" => theme.folder_btn = parse_hex(hex_val, theme.folder_btn),
                     _ => {} // Ignore unknown keys
                 }
             }
