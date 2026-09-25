@@ -4,7 +4,6 @@ Simply copy paste them into the style.ini file after running the program.
 
 PinkPig: 
 
-
 [Colors]
 background = #fffff2
 Text_Primary = #000000
@@ -25,7 +24,6 @@ folder_btn = #f535c5
 
 Powerline:
 
-
 [Colors]
 background = #252525
 Text_Primary = #b4b4b4
@@ -45,7 +43,6 @@ folder_btn = #12184b
 
 
 Defaultio (Ugly Purple):
-
 
 [Colors]
 background = #250444
@@ -87,7 +84,6 @@ folder_btn = #d32000
 
 Rainbow Dark:
 
-
 [Colors]
 background = #252525
 Text_Primary = #0f0f0f
@@ -106,4 +102,80 @@ path_btn = #5ddcab
 folder_btn = #d32000
 
 
+Ghastly Ghost:
 
+[Colors]
+background = #faf8e31e
+Text_Primary = #000000
+Text_dashboard = #000000
+text_title =     #000000
+list_txt =        #000000
+download_btn = #eeeac771
+upload_btn = #6bf87771
+delete_btn = #ee736f71
+move_btn = #eeeac771
+logout_btn = #eeeac771
+connect_btn = #eeeac771
+open_btn = #eeeac771
+refresh_btn = #eeeac771
+path_btn = #eeeac771
+folder_btn = #eeeac771
+
+
+Truly Glass: 
+
+[Colors]
+background = #faf9f510
+Text_Primary = #ffffff
+Text_dashboard = #ffffff
+text_title =     #ffffff
+list_txt =        #ffffff
+download_btn = #faf9ee10
+upload_btn = #faf9ee10
+delete_btn = #faf9ee10
+move_btn = #faf9ee10
+logout_btn = #faf9ee10
+connect_btn = #faf9ee10
+open_btn = #faf9ee10
+refresh_btn = #faf9ee10
+path_btn = #faf9ee10
+folder_btn = #faf9ee10
+
+
+Toxic Punk:
+
+[Colors]
+background = #f9c8ff34
+Text_Primary = #ffffff
+Text_dashboard = #ffffff
+text_title =     #ffffff
+list_txt =        #ffffff
+download_btn = #298f00
+upload_btn = #8f5600
+delete_btn = #7e008f
+move_btn = #8f5600
+logout_btn = #8f5600
+connect_btn = #f30000a1
+open_btn = #298f00
+refresh_btn = #7e008f
+path_btn = #298f00
+folder_btn = #298f00
+
+ThisCannotContinue:
+
+[Colors]
+background = #dcd8c0
+Text_Primary = #79776d
+Text_dashboard = #83827f
+text_title =     #3a3933
+list_txt =        #3a3933
+download_btn = #3a3933
+upload_btn = #3a3933
+delete_btn = #3a3933
+move_btn = #3a3933
+logout_btn = #3a3933
+connect_btn = #3a3933
+open_btn = #3a3933
+refresh_btn = #3a3933
+path_btn = #3a3933
+folder_btn = #3a3933
