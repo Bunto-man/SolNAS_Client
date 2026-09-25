@@ -20,6 +20,7 @@ open_btn = #f535c5
 refresh_btn = #f535c5
 path_btn = #df8054
 folder_btn = #f535c5
+theme_btn = #df8054
 
 
 Powerline:
@@ -40,6 +41,7 @@ open_btn = #3548f5
 refresh_btn = #3548f5
 path_btn = #1b4a69
 folder_btn = #12184b
+theme_btn = #12184b
 
 
 Defaultio (Ugly Purple):
@@ -60,6 +62,7 @@ open_btn = #ac5ddc
 refresh_btn = #ac5ddc
 path_btn = #5ddcab
 folder_btn = #ac5ddc
+theme_btn = #f07d12
 
 
 Rainbow Light:
@@ -80,6 +83,7 @@ open_btn = #848cff
 refresh_btn = #38b84d
 path_btn = #5ddcab
 folder_btn = #d32000
+theme_btn = #fcba00
 
 
 Rainbow Dark:
@@ -100,6 +104,7 @@ open_btn = #848cff
 refresh_btn = #38b84d
 path_btn = #5ddcab
 folder_btn = #d32000
+theme_btn = #0021db
 
 
 Ghastly Ghost:
@@ -120,6 +125,7 @@ open_btn = #eeeac771
 refresh_btn = #eeeac771
 path_btn = #eeeac771
 folder_btn = #eeeac771
+theme_btn = #eeeac771
 
 
 Truly Glass: 
@@ -140,6 +146,7 @@ open_btn = #faf9ee10
 refresh_btn = #faf9ee10
 path_btn = #faf9ee10
 folder_btn = #faf9ee10
+theme_btn = #faf9ee10
 
 
 Toxic Punk:
@@ -160,6 +167,8 @@ open_btn = #298f00
 refresh_btn = #7e008f
 path_btn = #298f00
 folder_btn = #298f00
+theme_btn = #43008f
+
 
 ThisCannotContinue:
 
@@ -179,3 +188,4 @@ open_btn = #3a3933
 refresh_btn = #3a3933
 path_btn = #3a3933
 folder_btn = #3a3933
+theme_btn = 79776d

@@ -5,7 +5,7 @@ use once_cell::sync::Lazy;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashSet,
+    collections::{HashSet,HashMap},
     io::Read,
     path::PathBuf,
     sync::mpsc::{self, Receiver, Sender},
@@ -67,6 +67,7 @@ struct AppTheme {
     refresh_btn: egui::Color32,
     path_btn: egui::Color32,
     folder_btn: egui::Color32,
+    theme_btn: egui::Color32,
     
 } //add onto these as you need to.
 //------------------------------------------------------------------------------------------
@@ -136,7 +137,12 @@ struct NasClientApp {
     image_cache: std::collections::HashMap<String, ImageState>,
 
     upload_progress: Option<f32>,
+
     theme: AppTheme,
+    active_theme_name: String,
+    available_themes: HashMap<String, AppTheme>,
+
+
     selected_files: HashSet<String>,
 
     show_config_modal: bool,
@@ -175,8 +181,17 @@ impl Default for NasClientApp {
             .build()
             .unwrap();
         //now return the the defaults
+
+        // Load the templates from the text file first
+        let available_themes = load_theme_templates(); 
+        
+        // Pass them into your newly upgraded loader
+        let (initial_theme_name, initial_theme) = load_theme(&available_themes);
+
         Self {
-            theme: load_theme(), // Load it exactly once when the app starts
+            theme: initial_theme,
+            active_theme_name: initial_theme_name,
+            available_themes, // Store the dictionary in your app state for the dropdown menu!
             view: ViewState::Login,
             tx,
             rx,
@@ -199,6 +214,29 @@ impl Default for NasClientApp {
             tray_icon: Some(tray_icon_instance),
             tray_listener_spawned: false,
             is_hidden: false,
+        }
+    }
+}
+
+impl Default for AppTheme {
+    fn default() -> Self {
+        Self {
+            background: egui::Color32::from_rgb(37, 37, 37), // Fallback dark gray
+            text_primary: egui::Color32::WHITE,
+            text_dashboard: egui::Color32::WHITE,
+            text_title: egui::Color32::WHITE,
+            list_txt: egui::Color32::WHITE,
+            download_btn: egui::Color32::GRAY,
+            upload_btn: egui::Color32::GRAY,
+            delete_btn: egui::Color32::GRAY,
+            move_btn: egui::Color32::GRAY,
+            logout_btn: egui::Color32::GRAY,
+            connect_btn: egui::Color32::GRAY,
+            open_btn: egui::Color32::GRAY,
+            refresh_btn: egui::Color32::GRAY,
+            path_btn: egui::Color32::GRAY,
+            folder_btn: egui::Color32::GRAY,
+            theme_btn: egui::Color32::GRAY,
         }
     }
 }
@@ -484,6 +522,7 @@ impl NasClientApp {
             .size(14.0);
         let logout_button = egui::Button::new(logout_raw).fill(self.theme.logout_btn);
 
+        
         // Top Navigation Bar
         // the first item is the logout button
         ui.horizontal(|ui| {
@@ -540,7 +579,68 @@ impl NasClientApp {
                     self.new_folder_name.clear();
                 }
             }
+
+            ui.separator();
+
+            ui.scope(|ui| {
+            // 1. Temporarily override the button background colors for this specific menu
+            let visuals = ui.visuals_mut();
+            visuals.widgets.inactive.bg_fill = self.theme.theme_btn;
+            // Optional: You can make the hover state slightly brighter, or keep it the same
+            visuals.widgets.hovered.bg_fill = self.theme.theme_btn; 
+            visuals.widgets.active.bg_fill = self.theme.theme_btn;
+
+            // 2. Build your personalized text using your custom dashboard text color
+            let theme_bttn = egui::RichText::new(format!("🎨 Theme: {}", self.active_theme_name))
+                .color(self.theme.text_dashboard)
+                .size(14.0);
+                
+            let reload_raw = egui::RichText::new("🔄 Reload Templates")
+            .color(self.theme.text_dashboard)
+            .size(14.0);
+            let reload_button = egui::Button::new(reload_raw).fill(self.theme.theme_btn);
+            // 3. Draw the actual dropdown menu
+            ui.menu_button(theme_bttn, |ui| {
+                
+                if ui.add(reload_button).clicked(){
+                    // Re-read the text file from the hard drive
+                self.available_themes = load_theme_templates();
+        
+                // If the user edited the currently active theme, apply the changes instantly!
+                if let Some(updated_theme) = self.available_themes.get(&self.active_theme_name) {
+                    self.theme = *updated_theme;
+                    save_theme(&self.active_theme_name, &self.theme);
+                }
+        
+                ui.close_menu();
+                }
+                ui.separator();
+
+                let mut theme_names: Vec<&String> = self.available_themes.keys().collect();
+                theme_names.sort();
+
+                for name in theme_names {
+            let is_active = self.active_theme_name == *name;
+            let display_text = if is_active { format!("✔ {}", name) } else { name.to_string() };
+
+                    // Apply the primary text color to the dropdown list items
+                    let option_text = egui::RichText::new(display_text).color(self.theme.theme_btn);
+
+                    if ui.button(option_text).clicked() {
+                        if let Some(new_theme) = self.available_themes.get(name) {
+                            self.theme = *new_theme;
+                            self.active_theme_name = name.clone();
+                    
+                            // Save the selection
+                            save_theme(&self.active_theme_name, &self.theme);
+                        }
+                        ui.close_menu();
+                    }
+                }
+            });
         });
+    });
+        
 
         if let Some(progress) = self.upload_progress {
             ui.add_space(5.0);
@@ -1439,10 +1539,12 @@ fn parse_hex(hex: &str, fallback: egui::Color32) -> egui::Color32 {
     egui::Color32::from_hex(clean_hex).unwrap_or(fallback)
 }
 
-fn load_theme() -> AppTheme {
-    // Define your hardcoded default fallback colors here
+fn load_theme(available_themes: &HashMap<String, AppTheme>) -> (String, AppTheme) {
+    // 1. Define your default fallback name and hardcoded colors
+    let mut active_theme_name = String::from("Defaultio (Ugly Purple)");
+    
     let mut theme = AppTheme {
-        background: egui::Color32::from_hex("#250444").unwrap(), // Dark Navy
+        background: egui::Color32::from_hex("#250444").unwrap(),
         text_primary: egui::Color32::BLACK,
         text_dashboard: egui::Color32::WHITE,
         text_title: egui::Color32::from_hex("#FFFFFF").unwrap(),
@@ -1457,11 +1559,16 @@ fn load_theme() -> AppTheme {
         refresh_btn: egui::Color32::from_hex("#ac5ddc").unwrap(),
         path_btn: egui::Color32::from_hex("#5ddcab").unwrap(),
         folder_btn: egui::Color32::from_hex("#ac5ddc").unwrap(),
+        theme_btn: egui::Color32::from_hex("#ac5ddc").unwrap(),
     };
-    //This just implements a ton of hardcoded default styles.
+
     if !std::path::Path::new(STYLE_FILE).exists() {
         println!("Style file not found. Creating {}...", STYLE_FILE);
-        let default_ini = "[Colors]\n\
+        // Write the new format with the Active_Theme setting at the top
+        let default_ini = "[Settings]\n\
+                           Active_Theme = Defaultio (Ugly Purple)\n\
+                           \n\
+                           [Colors]\n\
                            background = #250444\n\
                            Text_Primary = #000000\n\
                            Text_dashboard = #FFFFFF\n\
@@ -1476,19 +1583,36 @@ fn load_theme() -> AppTheme {
                            open_btn = #ac5ddc\n\
                            refresh_btn = #ac5ddc\n\
                            path_btn = #5ddcab\n\
-                           folder_btn = #ac5ddc";
+                           folder_btn = #ac5ddc\n\
+                           theme_btn = #ac5ddc";
         let _ = std::fs::write(STYLE_FILE, default_ini);
-        return theme; // Return the defaults since we just created the file
+        return (active_theme_name, theme); 
     }
 
-    // Read the file and parse the custom colors
+    // 2. Read the file to find the active theme name first
     if let Ok(content) = std::fs::read_to_string(STYLE_FILE) {
         for line in content.lines() {
-            if line.trim().starts_with('#') || line.trim().starts_with('[') {
-                continue; // Skip comments and section headers
+            let line_clean = line.trim();
+            if line_clean.to_lowercase().starts_with("active_theme") {
+                if let Some((_, val)) = line_clean.split_once('=') {
+                    active_theme_name = val.trim().to_string();
+                }
+            }
+        }
+
+        // 3. Set the base theme to whatever the INI requested (if it exists in our txt file)
+        if let Some(template_theme) = available_themes.get(&active_theme_name) {
+            theme = *template_theme;
+        }
+
+        // 4. Read the file again to apply any manual custom color overrides
+        for line in content.lines() {
+            let line_clean = line.trim();
+            if line_clean.starts_with('#') || line_clean.starts_with('[') || line_clean.to_lowercase().starts_with("active_theme") {
+                continue; 
             }
 
-            let parts: Vec<&str> = line.split('=').collect();
+            let parts: Vec<&str> = line_clean.split('=').collect();
             if parts.len() == 2 {
                 let key = parts[0].trim().to_lowercase();
                 let hex_val = parts[1].trim();
@@ -1496,14 +1620,10 @@ fn load_theme() -> AppTheme {
                 match key.as_str() {
                     "background" => theme.background = parse_hex(hex_val, theme.background),
                     "text_primary" => theme.text_primary = parse_hex(hex_val, theme.text_primary),
-                    "text_dashboard" => {
-                        theme.text_dashboard = parse_hex(hex_val, theme.text_dashboard)
-                    }
+                    "text_dashboard" => theme.text_dashboard = parse_hex(hex_val, theme.text_dashboard),
                     "text_title" => theme.text_title = parse_hex(hex_val, theme.text_title),
-                    "list_txt" => theme.list_txt = parse_hex(hex_val, theme.list_txt ),
-                    "download_btn" => {
-                        theme.download_btn = parse_hex(hex_val, theme.download_btn)
-                    }
+                    "list_txt" => theme.list_txt = parse_hex(hex_val, theme.list_txt),
+                    "download_btn" => theme.download_btn = parse_hex(hex_val, theme.download_btn),
                     "upload_btn" => theme.upload_btn = parse_hex(hex_val, theme.upload_btn),
                     "delete_btn" => theme.delete_btn = parse_hex(hex_val, theme.delete_btn),
                     "move_btn" => theme.move_btn = parse_hex(hex_val, theme.move_btn),
@@ -1513,13 +1633,127 @@ fn load_theme() -> AppTheme {
                     "refresh_btn" => theme.refresh_btn = parse_hex(hex_val, theme.refresh_btn),
                     "path_btn" => theme.path_btn = parse_hex(hex_val, theme.path_btn),
                     "folder_btn" => theme.folder_btn = parse_hex(hex_val, theme.folder_btn),
-                    _ => {} // Ignore unknown keys
+                    "theme_btn" => theme.theme_btn = parse_hex(hex_val, theme.theme_btn),
+                    _ => {} 
                 }
             }
         }
     }
 
-    theme
+    (active_theme_name, theme)
+}
+
+fn load_theme_templates() -> HashMap<String, AppTheme> {
+    let mut themes = HashMap::new();
+    
+    // Read the file. If it doesn't exist, return an empty map.
+    let content = match std::fs::read_to_string("StyleTemplates.txt") {
+        Ok(c) => c,
+        Err(_) => return themes,
+    };
+
+    let mut current_name = String::new();
+    let mut current_theme = AppTheme::default();
+
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('[') { continue; }
+
+        // Detect a new theme name (e.g., "PinkPig:")
+        if line.ends_with(':') {
+            if !current_name.is_empty() {
+                themes.insert(current_name.clone(), current_theme);
+            }
+            current_name = line.trim_end_matches(':').trim().to_string();
+            current_theme = AppTheme::default(); // Reset for the new theme
+        } 
+        // Parse the key-value color pairs
+        else if let Some((key, val)) = line.split_once('=') {
+            let hex = val.trim();
+            match key.trim().to_lowercase().as_str() {
+                "background" => current_theme.background = parse_hex(hex, current_theme.background),
+                "text_primary" => current_theme.text_primary = parse_hex(hex, current_theme.text_primary),
+                "text_dashboard" => current_theme.text_dashboard = parse_hex(hex, current_theme.text_dashboard),
+                "text_title" => current_theme.text_title = parse_hex(hex, current_theme.text_title),
+                "list_txt" => current_theme.list_txt = parse_hex(hex, current_theme.list_txt),
+                "download_btn" => current_theme.download_btn = parse_hex(hex, current_theme.download_btn),
+                "upload_btn" => current_theme.upload_btn = parse_hex(hex, current_theme.upload_btn),
+                "delete_btn" => current_theme.delete_btn = parse_hex(hex, current_theme.delete_btn),
+                "move_btn" => current_theme.move_btn = parse_hex(hex, current_theme.move_btn),
+                "logout_btn" => current_theme.logout_btn = parse_hex(hex, current_theme.logout_btn),
+                "connect_btn" => current_theme.connect_btn = parse_hex(hex, current_theme.connect_btn),
+                "open_btn" => current_theme.open_btn = parse_hex(hex, current_theme.open_btn),
+                "refresh_btn" => current_theme.refresh_btn = parse_hex(hex, current_theme.refresh_btn),
+                "path_btn" => current_theme.path_btn = parse_hex(hex, current_theme.path_btn),
+                "folder_btn" => current_theme.folder_btn = parse_hex(hex, current_theme.folder_btn),
+                "theme_btn" => current_theme.theme_btn = parse_hex(hex, current_theme.theme_btn),
+                _ => {}
+            }
+        }
+    }
+    
+    // Catch the final theme in the file
+    if !current_name.is_empty() {
+        themes.insert(current_name, current_theme);
+    }
+    
+    themes
+}
+
+// Put this helper function right above your save_theme function
+fn color_to_hex(c: egui::Color32) -> String {
+    if c.a() == 255 {
+        // Standard 6-character hex for solid colors
+        format!("#{:02X}{:02X}{:02X}", c.r(), c.g(), c.b())
+    } else {
+        // 8-character hex for transparent colors
+        format!("#{:02X}{:02X}{:02X}{:02X}", c.r(), c.g(), c.b(), c.a())
+    }
+}
+
+fn save_theme(theme_name: &str, theme: &AppTheme) {
+    let ini_content = format!(
+        "[Settings]\n\
+         Active_Theme = {}\n\
+         \n\
+         [Colors]\n\
+         background = {}\n\
+         Text_Primary = {}\n\
+         Text_dashboard = {}\n\
+         text_title = {}\n\
+         list_txt = {}\n\
+         download_btn = {}\n\
+         upload_btn = {}\n\
+         delete_btn = {}\n\
+         move_btn = {}\n\
+         logout_btn = {}\n\
+         connect_btn = {}\n\
+         open_btn = {}\n\
+         refresh_btn = {}\n\
+         path_btn = {}\n\
+         folder_btn = {}\n\
+         theme_btn = {}\n
+         ",
+        theme_name,
+        color_to_hex(theme.background),
+        color_to_hex(theme.text_primary),
+        color_to_hex(theme.text_dashboard),
+        color_to_hex(theme.text_title),
+        color_to_hex(theme.list_txt),
+        color_to_hex(theme.download_btn),
+        color_to_hex(theme.upload_btn),
+        color_to_hex(theme.delete_btn),
+        color_to_hex(theme.move_btn),
+        color_to_hex(theme.logout_btn),
+        color_to_hex(theme.connect_btn),
+        color_to_hex(theme.open_btn),
+        color_to_hex(theme.refresh_btn),
+        color_to_hex(theme.path_btn),
+        color_to_hex(theme.folder_btn),
+        color_to_hex(theme.theme_btn),
+    );
+    
+    let _ = std::fs::write(STYLE_FILE, ini_content);
 }
 
 // --- Main Entry ---
