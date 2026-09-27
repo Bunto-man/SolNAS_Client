@@ -7,41 +7,41 @@ PinkPig:
 [Colors]
 background = #fffff2
 Text_Primary = #000000
-Text_dashboard = #000000
+Text_dashboard = #f0efef
 text_title =     #f535c5
 list_txt =        #f535c5
 download_btn = #f535c5
 upload_btn = #f535c5
 delete_btn = #dc3545
-move_btn = #df8054
+move_btn = #ff8b8b
 logout_btn = #f535c5
 connect_btn = #c183ce
 open_btn = #f535c5
-refresh_btn = #f535c5
-path_btn = #df8054
+refresh_btn = #ff8b8b
+path_btn = #ff8b8b
 folder_btn = #f535c5
-theme_btn = #df8054
+theme_btn = #ff8b8b
 
 
 Powerline:
 
 [Colors]
 background = #252525
-Text_Primary = #b4b4b4
-Text_dashboard = #b4b4b4
+Text_Primary = #0e0d0d
+Text_dashboard = #0e0d0d
 text_title =     #35a8f5
 list_txt =        #75c5fa
-download_btn = #3548f5
-upload_btn = #3548f5
-delete_btn = #2a8500
-move_btn = #c45522
-logout_btn = #3548f5
-connect_btn = #3548f5
-open_btn = #3548f5
-refresh_btn = #3548f5
-path_btn = #1b4a69
-folder_btn = #12184b
-theme_btn = #12184b
+download_btn = #62dbeb
+upload_btn = #62dbeb
+delete_btn = #e76d5d
+move_btn = #5de78b
+logout_btn = #62dbeb
+connect_btn = #62dbeb
+open_btn = #62dbeb
+refresh_btn = #62dbeb
+path_btn = #62dbeb
+folder_btn = #62dbeb
+theme_btn = #62dbeb
 
 
 Defaultio (Ugly Purple):
@@ -70,8 +70,8 @@ Rainbow Light:
 [Colors]
 background = #f1ecf7
 Text_Primary = #111111
-Text_dashboard = #0f0f0f
-text_title =     #3f6600
+Text_dashboard = #141414
+text_title =     #9dff00
 list_txt =        #0c0c0c
 download_btn = #4b4eff
 upload_btn = #d30909
@@ -98,13 +98,13 @@ download_btn = #4b4eff
 upload_btn = #d30909
 delete_btn = #ff91a1
 move_btn = #f07d12
-logout_btn = #9e6805
+logout_btn = #f07d12
 connect_btn = #0021db
 open_btn = #848cff
 refresh_btn = #38b84d
 path_btn = #5ddcab
 folder_btn = #d32000
-theme_btn = #0021db
+theme_btn = #5165d6
 
 
 Ghastly Ghost:
@@ -152,22 +152,22 @@ theme_btn = #faf9ee10
 Toxic Punk:
 
 [Colors]
-background = #f9c8ff34
+background = #f9c8ffe3
 Text_Primary = #ffffff
 Text_dashboard = #ffffff
-text_title =     #ffffff
-list_txt =        #ffffff
-download_btn = #298f00
-upload_btn = #8f5600
-delete_btn = #7e008f
-move_btn = #8f5600
-logout_btn = #8f5600
+text_title =     #b3ff00
+list_txt =        #1d1c1c
+download_btn = #278004
+upload_btn = #cf7c00
+delete_btn = #a35cf3
+move_btn = #cf7c00
+logout_btn = #cf7c00
 connect_btn = #f30000a1
-open_btn = #298f00
-refresh_btn = #7e008f
-path_btn = #298f00
-folder_btn = #298f00
-theme_btn = #43008f
+open_btn = #278004
+refresh_btn = #a35cf3
+path_btn = #278004
+folder_btn = #278004
+theme_btn = #a35cf3
 
 
 ThisCannotContinue:
@@ -176,7 +176,7 @@ ThisCannotContinue:
 background = #dcd8c0
 Text_Primary = #79776d
 Text_dashboard = #83827f
-text_title =     #3a3933
+text_title =     #c4c3bf
 list_txt =        #3a3933
 download_btn = #3a3933
 upload_btn = #3a3933
@@ -188,4 +188,67 @@ open_btn = #3a3933
 refresh_btn = #3a3933
 path_btn = #3a3933
 folder_btn = #3a3933
-theme_btn = 79776d
+theme_btn = #79776d
+
+
+Windows7:
+
+[Colors]
+background = #0274a8
+Text_Primary = #181817
+Text_dashboard = #181817
+text_title =     #ffffff
+list_txt =        #ffffff
+download_btn = #4ca701
+upload_btn = #da5903
+delete_btn = #ff0015
+move_btn = #da5903
+logout_btn = #da5903
+connect_btn = #ffee00
+open_btn = #0059ff
+refresh_btn = #0059ff
+path_btn = #4ca701
+folder_btn = #4ca701
+theme_btn = #00ffbf
+
+
+GreenTwintails2007:
+
+[Colors]
+background = #a8ffded8
+Text_Primary = #0c0c0c
+Text_dashboard = #0c0c0c
+text_title =     #fc155a
+list_txt =        #fc155a
+download_btn = #00fff2
+upload_btn = #00fff2
+delete_btn = #fc155a
+move_btn = #00ff95
+logout_btn = #00fff2
+connect_btn = #00fff2
+open_btn = #00ff95
+refresh_btn = #00fff2
+path_btn = #00fff2
+folder_btn = #00fff2
+theme_btn = #fc155a
+
+
+RedTwinDrills:
+
+[Colors]
+background = #bdb5b5f1
+Text_Primary = #0c0c0c
+Text_dashboard = #0c0c0c
+text_title =     #ff0241
+list_txt =        #b31313
+download_btn = #b31313
+upload_btn = #b31313
+delete_btn = #c96e07
+move_btn = #b31313
+logout_btn = #b31313
+connect_btn = #b31313
+open_btn = #b31313
+refresh_btn = #b31313
+path_btn = #c96e07
+folder_btn = #b31313
+theme_btn = #ff0241

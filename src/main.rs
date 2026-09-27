@@ -422,14 +422,14 @@ impl NasClientApp {
         });
 
         ui.vertical_centered(|ui| {
-            ui.label(egui::RichText::new("NAS IP Address:").strong().size(24.0).color(self.theme.text_dashboard));
+            ui.label(egui::RichText::new("NAS IP Address:").strong().size(24.0).color(self.theme.list_txt));
 
             ui.add(
                 egui::TextEdit::singleline(&mut self.ip_input) // change the size of the text bar
                     .font(egui::FontId::proportional(24.0)),
             );
             ui.add_space(10.0);
-            ui.label(egui::RichText::new("Password:").strong().size(24.0).color(self.theme.text_dashboard));
+            ui.label(egui::RichText::new("Password:").strong().size(24.0).color(self.theme.list_txt));
 
             ui.add(
                 egui::TextEdit::singleline(&mut self.password_input) // change the size of the text bar
@@ -486,7 +486,7 @@ impl NasClientApp {
 
         if !self.status_message.is_empty() {
             ui.add_space(10.0);
-            ui.label(egui::RichText::new(&self.status_message).color(self.theme.text_dashboard));
+            ui.label(egui::RichText::new(&self.status_message).color(self.theme.list_txt));
         }
     }
     /// # Render dashboard
@@ -592,7 +592,7 @@ impl NasClientApp {
 
             // 2. Build your personalized text using your custom dashboard text color
             let theme_bttn = egui::RichText::new(format!("🎨 Theme: {}", self.active_theme_name))
-                .color(self.theme.text_dashboard)
+                .color(self.theme.text_title)
                 .size(14.0);
                 
             let reload_raw = egui::RichText::new("🔄 Reload Templates")
@@ -754,7 +754,9 @@ impl NasClientApp {
                                 }
                                 self.refresh_files(ctx);
                             }
-                            ui.add_space(20.0);
+
+                            ui.add_space(5.0);
+
                             if ui.add(folder_move_button).clicked() {
                                 self.moving_item = Some(file.name.clone());
                             }
