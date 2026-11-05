@@ -5,7 +5,7 @@ use once_cell::sync::Lazy;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashSet,HashMap},
+    collections::{HashMap, HashSet},
     io::Read,
     path::PathBuf,
     sync::mpsc::{self, Receiver, Sender},
@@ -17,6 +17,7 @@ use tray_icon::TrayIcon;
 // -- Ini Files --
 const CONFIG_FILE: &str = "clientConfig.ini";
 const STYLE_FILE: &str = "style.ini";
+const PROTECTIONS_FILE: &str = "protections.ini";
 // --- Data Structures ---
 #[derive(Serialize)]
 struct AuthRequest {
@@ -68,7 +69,6 @@ struct AppTheme {
     path_btn: egui::Color32,
     folder_btn: egui::Color32,
     theme_btn: egui::Color32,
-    
 } //add onto these as you need to.
 //------------------------------------------------------------------------------------------
 // --- Background Worker Messages ---
@@ -142,7 +142,6 @@ struct NasClientApp {
     active_theme_name: String,
     available_themes: HashMap<String, AppTheme>,
 
-
     selected_files: HashSet<String>,
 
     show_config_modal: bool,
@@ -151,6 +150,7 @@ struct NasClientApp {
     tray_icon: Option<TrayIcon>, // figure out how to kill this warning.
     tray_listener_spawned: bool,
     is_hidden: bool,
+    locked_items: std::collections::HashSet<String>,
 }
 /// - Give Default values to the app to prevent bugs.
 /// - Each new value for the NasClientApp struct needs a default!
@@ -183,8 +183,8 @@ impl Default for NasClientApp {
         //now return the the defaults
 
         // Load the templates from the text file first
-        let available_themes = load_theme_templates(); 
-        
+        let available_themes = load_theme_templates();
+
         // Pass them into your newly upgraded loader
         let (initial_theme_name, initial_theme) = load_theme(&available_themes);
 
@@ -214,6 +214,7 @@ impl Default for NasClientApp {
             tray_icon: Some(tray_icon_instance),
             tray_listener_spawned: false,
             is_hidden: false,
+            locked_items: load_protections(),
         }
     }
 }
@@ -422,14 +423,24 @@ impl NasClientApp {
         });
 
         ui.vertical_centered(|ui| {
-            ui.label(egui::RichText::new("NAS IP Address:").strong().size(24.0).color(self.theme.list_txt));
+            ui.label(
+                egui::RichText::new("NAS IP Address:")
+                    .strong()
+                    .size(24.0)
+                    .color(self.theme.list_txt),
+            );
 
             ui.add(
                 egui::TextEdit::singleline(&mut self.ip_input) // change the size of the text bar
                     .font(egui::FontId::proportional(24.0)),
             );
             ui.add_space(10.0);
-            ui.label(egui::RichText::new("Password:").strong().size(24.0).color(self.theme.list_txt));
+            ui.label(
+                egui::RichText::new("Password:")
+                    .strong()
+                    .size(24.0)
+                    .color(self.theme.list_txt),
+            );
 
             ui.add(
                 egui::TextEdit::singleline(&mut self.password_input) // change the size of the text bar
@@ -522,7 +533,6 @@ impl NasClientApp {
             .size(14.0);
         let logout_button = egui::Button::new(logout_raw).fill(self.theme.logout_btn);
 
-        
         // Top Navigation Bar
         // the first item is the logout button
         ui.horizontal(|ui| {
@@ -545,7 +555,11 @@ impl NasClientApp {
                     self.refresh_files(ctx);
                 }
             }
-            ui.label(egui::RichText::new(format!("/{}", self.current_path)).strong().color(self.theme.list_txt));
+            ui.label(
+                egui::RichText::new(format!("/{}", self.current_path))
+                    .strong()
+                    .color(self.theme.list_txt),
+            );
             //refresh button is last of the top.
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.add(refresh_button).clicked() {
@@ -583,64 +597,70 @@ impl NasClientApp {
             ui.separator();
 
             ui.scope(|ui| {
-            // 1. Temporarily override the button background colors for this specific menu
-            let visuals = ui.visuals_mut();
-            visuals.widgets.inactive.bg_fill = self.theme.theme_btn;
-            // Optional: You can make the hover state slightly brighter, or keep it the same
-            visuals.widgets.hovered.bg_fill = self.theme.theme_btn; 
-            visuals.widgets.active.bg_fill = self.theme.theme_btn;
+                // 1. Temporarily override the button background colors for this specific menu
+                let visuals = ui.visuals_mut();
+                visuals.widgets.inactive.bg_fill = self.theme.theme_btn;
+                // Optional: You can make the hover state slightly brighter, or keep it the same
+                visuals.widgets.hovered.bg_fill = self.theme.theme_btn;
+                visuals.widgets.active.bg_fill = self.theme.theme_btn;
 
-            // 2. Build your personalized text using your custom dashboard text color
-            let theme_bttn = egui::RichText::new(format!("🎨 Theme: {}", self.active_theme_name))
-                .color(self.theme.text_title)
-                .size(14.0);
-                
-            let reload_raw = egui::RichText::new("🔄 Reload Templates")
-            .color(self.theme.text_dashboard)
-            .size(14.0);
-            let reload_button = egui::Button::new(reload_raw).fill(self.theme.theme_btn);
-            // 3. Draw the actual dropdown menu
-            ui.menu_button(theme_bttn, |ui| {
-                
-                if ui.add(reload_button).clicked(){
-                    // Re-read the text file from the hard drive
-                self.available_themes = load_theme_templates();
-        
-                // If the user edited the currently active theme, apply the changes instantly!
-                if let Some(updated_theme) = self.available_themes.get(&self.active_theme_name) {
-                    self.theme = *updated_theme;
-                    save_theme(&self.active_theme_name, &self.theme);
-                }
-        
-                ui.close_menu();
-                }
-                ui.separator();
+                // 2. Build your personalized text using your custom dashboard text color
+                let theme_bttn =
+                    egui::RichText::new(format!("🎨 Theme: {}", self.active_theme_name))
+                        .color(self.theme.text_title)
+                        .size(14.0);
 
-                let mut theme_names: Vec<&String> = self.available_themes.keys().collect();
-                theme_names.sort();
+                let reload_raw = egui::RichText::new("🔄 Reload Templates")
+                    .color(self.theme.text_dashboard)
+                    .size(14.0);
+                let reload_button = egui::Button::new(reload_raw).fill(self.theme.theme_btn);
+                // 3. Draw the actual dropdown menu
+                ui.menu_button(theme_bttn, |ui| {
+                    if ui.add(reload_button).clicked() {
+                        // Re-read the text file from the hard drive
+                        self.available_themes = load_theme_templates();
 
-                for name in theme_names {
-            let is_active = self.active_theme_name == *name;
-            let display_text = if is_active { format!("✔ {}", name) } else { name.to_string() };
-
-                    // Apply the primary text color to the dropdown list items
-                    let option_text = egui::RichText::new(display_text).color(self.theme.theme_btn);
-
-                    if ui.button(option_text).clicked() {
-                        if let Some(new_theme) = self.available_themes.get(name) {
-                            self.theme = *new_theme;
-                            self.active_theme_name = name.clone();
-                    
-                            // Save the selection
+                        // If the user edited the currently active theme, apply the changes instantly!
+                        if let Some(updated_theme) =
+                            self.available_themes.get(&self.active_theme_name)
+                        {
+                            self.theme = *updated_theme;
                             save_theme(&self.active_theme_name, &self.theme);
                         }
+
                         ui.close_menu();
                     }
-                }
+                    ui.separator();
+
+                    let mut theme_names: Vec<&String> = self.available_themes.keys().collect();
+                    theme_names.sort();
+
+                    for name in theme_names {
+                        let is_active = self.active_theme_name == *name;
+                        let display_text = if is_active {
+                            format!("✔ {}", name)
+                        } else {
+                            name.to_string()
+                        };
+
+                        // Apply the primary text color to the dropdown list items
+                        let option_text =
+                            egui::RichText::new(display_text).color(self.theme.theme_btn);
+
+                        if ui.button(option_text).clicked() {
+                            if let Some(new_theme) = self.available_themes.get(name) {
+                                self.theme = *new_theme;
+                                self.active_theme_name = name.clone();
+
+                                // Save the selection
+                                save_theme(&self.active_theme_name, &self.theme);
+                            }
+                            ui.close_menu();
+                        }
+                    }
+                });
             });
         });
-    });
-        
 
         if let Some(progress) = self.upload_progress {
             ui.add_space(5.0);
@@ -698,7 +718,11 @@ impl NasClientApp {
             for file in self.files.clone() {
                 ui.horizontal(|ui| {
                     if file.is_dir {
-                        ui.label(egui::RichText::new("📁").font(egui::FontId::proportional(24.0)).color(self.theme.list_txt));
+                        ui.label(
+                            egui::RichText::new("📁")
+                                .font(egui::FontId::proportional(24.0))
+                                .color(self.theme.list_txt),
+                        );
 
                         ui.label(
                             egui::RichText::new(&file.name)
@@ -707,11 +731,7 @@ impl NasClientApp {
                                 .color(self.theme.list_txt),
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let folder_delete_button_raw = egui::RichText::new("🗑 delete")
-                                .color(self.theme.text_primary)
-                                .size(15.0);
-                            let folder_delete_button = egui::Button::new(folder_delete_button_raw)
-                                .fill(self.theme.delete_btn);
+                            let is_locked = self.locked_items.contains(&file.name); //new thing
 
                             let folder_open_button_raw = egui::RichText::new("Open Folder")
                                 .color(self.theme.text_primary)
@@ -723,28 +743,40 @@ impl NasClientApp {
                                 .size(24.0);
                             let folder_move_button =
                                 egui::Button::new(folder_move_button_raw).fill(self.theme.move_btn);
+                            //new item to raise the lock flag
+                            //
+                            //
+                            if !is_locked {
+                                let folder_delete_button_raw = egui::RichText::new("🗑 delete")
+                                    .color(self.theme.text_primary)
+                                    .size(24.0);
+                                let folder_delete_button =
+                                    egui::Button::new(folder_delete_button_raw)
+                                        .fill(self.theme.delete_btn);
 
-                            if ui.add(folder_delete_button).clicked() {
-                                //improved delete logic
+                                if ui.add(folder_delete_button).clicked() {
+                                    //improved delete logic
 
-                                if self.item_pending_deletion.as_deref() == Some(&file.name) {
-                                    // SECOND CLICK: Execute the actual delete function
-                                    self.delete_item(&file.name, ctx);
+                                    if self.item_pending_deletion.as_deref() == Some(&file.name) {
+                                        // SECOND CLICK: Execute the actual delete function
+                                        self.delete_item(&file.name, ctx);
 
-                                    // Clear the state and the message
-                                    self.item_pending_deletion = None;
-                                    self.status_message = String::new();
-                                } else {
-                                    // FIRST CLICK: Queue it up and show the system message
-                                    self.item_pending_deletion = Some(file.name.clone());
-                                    self.status_message = format!(
-                                        "Delete '{}'? Click 🗑 again to confirm.",
-                                        &file.name
-                                    );
+                                        // Clear the state and the message
+                                        self.item_pending_deletion = None;
+                                        self.status_message = String::new();
+                                    } else {
+                                        // FIRST CLICK: Queue it up and show the system message
+                                        self.item_pending_deletion = Some(file.name.clone());
+                                        self.status_message = format!(
+                                            "Delete '{}'? Click 🗑 again to confirm.",
+                                            &file.name
+                                        );
+                                    }
                                 }
+
+                                ui.add_space(10.0);
                             }
 
-                            ui.add_space(20.0);
                             if ui.add(folder_open_button).clicked() {
                                 if self.current_path.is_empty() {
                                     self.current_path = file.name.clone();
@@ -759,6 +791,34 @@ impl NasClientApp {
 
                             if ui.add(folder_move_button).clicked() {
                                 self.moving_item = Some(file.name.clone());
+                            }
+                            let lock_text = if is_locked {
+                                "🔓 Unlock"
+                            } else {
+                                "🔒 Lock"
+                            };
+                            let lock_button_raw = egui::RichText::new(lock_text)
+                                .color(self.theme.text_primary)
+                                .size(20.0);
+
+                            // You can use a generic dark grey fill, or add a lock_btn color to your style.ini
+                            let lock_button =
+                                egui::Button::new(lock_button_raw).fill(self.theme.move_btn);
+
+                            if ui.add(lock_button).clicked() {
+                                if is_locked {
+                                    self.locked_items.remove(&file.name);
+                                } else {
+                                    self.locked_items.insert(file.name.clone());
+
+                                    // Optional: Immediately clear any pending deletion state just in case
+                                    // the user clicked "🗑 delete" once but hasn't confirmed it yet.
+                                    if self.item_pending_deletion.as_deref() == Some(&file.name) {
+                                        self.item_pending_deletion = None;
+                                        self.status_message = String::new();
+                                    }
+                                }
+                                save_protections(&self.locked_items); //save the changes to the ini file.
                             }
                         });
                     } else {
@@ -803,7 +863,9 @@ impl NasClientApp {
                         } else {
                             // Standard file icon for PDFs, TXTs, etc.
                             ui.label(
-                                egui::RichText::new("📄").font(egui::FontId::proportional(24.0)).color(self.theme.list_txt),
+                                egui::RichText::new("📄")
+                                    .font(egui::FontId::proportional(24.0))
+                                    .color(self.theme.list_txt),
                             );
                         }
 
@@ -817,11 +879,12 @@ impl NasClientApp {
                         let mb = file.size as f64 / 1_048_576.0;
                         ui.label(format!("({:.2} MB)", mb));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let file_delete_button_raw = egui::RichText::new("🗑 delete")
-                                .color(self.theme.text_primary)
-                                .size(15.0);
-                            let file_delete_button = egui::Button::new(file_delete_button_raw)
-                                .fill(self.theme.delete_btn);
+                            let is_locked = self.locked_items.contains(&file.name); //new thing
+                            // let file_delete_button_raw = egui::RichText::new("🗑 delete")
+                            //     .color(self.theme.text_primary)
+                            //     .size(15.0);
+                            // let file_delete_button = egui::Button::new(file_delete_button_raw)
+                            //     .fill(self.theme.delete_btn);
 
                             let file_move_raw = egui::RichText::new("Move")
                                 .color(self.theme.text_primary)
@@ -834,25 +897,38 @@ impl NasClientApp {
                                 .size(24.0);
                             let file_download_button =
                                 egui::Button::new(file_download_raw).fill(self.theme.download_btn);
+                            //this is where the second fix begins
+                            //
+                            //
+                            if !is_locked {
+                                let folder_delete_button_raw = egui::RichText::new("🗑 delete")
+                                    .color(self.theme.text_primary)
+                                    .size(15.0);
+                                let folder_delete_button =
+                                    egui::Button::new(folder_delete_button_raw)
+                                        .fill(self.theme.delete_btn);
 
-                            if ui.add(file_delete_button).clicked() {
-                                //file deletion improved logic
-                                if self.item_pending_deletion.as_deref() == Some(&file.name) {
-                                    // SECOND CLICK: Execute the actual delete function
-                                    self.delete_item(&file.name, ctx);
+                                if ui.add(folder_delete_button).clicked() {
+                                    //improved delete logic
 
-                                    // Clear the state and the message
-                                    self.item_pending_deletion = None;
-                                    self.status_message = String::new();
-                                } else {
-                                    // FIRST CLICK: Queue it up and show the system message
-                                    self.item_pending_deletion = Some(file.name.clone());
-                                    self.status_message = format!(
-                                        "Delete '{}'? Click 🗑 again to confirm.",
-                                        &file.name
-                                    );
+                                    if self.item_pending_deletion.as_deref() == Some(&file.name) {
+                                        // SECOND CLICK: Execute the actual delete function
+                                        self.delete_item(&file.name, ctx);
+
+                                        // Clear the state and the message
+                                        self.item_pending_deletion = None;
+                                        self.status_message = String::new();
+                                    } else {
+                                        // FIRST CLICK: Queue it up and show the system message
+                                        self.item_pending_deletion = Some(file.name.clone());
+                                        self.status_message = format!(
+                                            "Delete '{}'? Click 🗑 again to confirm.",
+                                            &file.name
+                                        );
+                                    }
                                 }
                             }
+
                             ui.add_space(20.0);
                             if ui.add(file_download_button).clicked() {
                                 // Prompt user for where to save the file!
@@ -866,7 +942,35 @@ impl NasClientApp {
                             if ui.add(file_move_button).clicked() {
                                 self.moving_item = Some(file.name.clone());
                             }
-                        });
+                            let lock_text = if is_locked {
+                                "🔓 Unlock"
+                            } else {
+                                "🔒 Lock"
+                            };
+                            let lock_button_raw = egui::RichText::new(lock_text)
+                                .color(self.theme.text_primary)
+                                .size(20.0);
+
+                            // You can use a generic dark grey fill, or add a lock_btn color to your style.ini
+                            let lock_button =
+                                egui::Button::new(lock_button_raw).fill(self.theme.move_btn);
+
+                            if ui.add(lock_button).clicked() {
+                                if is_locked {
+                                    self.locked_items.remove(&file.name);
+                                } else {
+                                    self.locked_items.insert(file.name.clone());
+
+                                    // Optional: Immediately clear any pending deletion state just in case
+                                    // the user clicked "🗑 delete" once but hasn't confirmed it yet.
+                                    if self.item_pending_deletion.as_deref() == Some(&file.name) {
+                                        self.item_pending_deletion = None;
+                                        self.status_message = String::new();
+                                    }
+                                }
+                                save_protections(&self.locked_items); //save the changes to the ini file.
+                            }
+                        }); //end ui horizontal
                     }
                 });
                 ui.separator();
@@ -1250,11 +1354,9 @@ impl NasClientApp {
                             let pixels = image_buffer.as_flat_samples();
 
                             // Convert to egui's specific color format
-                            let color_image = egui::ColorImage::from_rgba_unmultiplied(
-                                size, 
-                                pixels.as_slice()
-                            );
-                            
+                            let color_image =
+                                egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
+
                             // Safely send the lightweight image back to the main thread
                             let _ = tx.send(AppMsg::ImageLoaded(filename, color_image));
                             ctx_clone.request_repaint();
@@ -1263,7 +1365,7 @@ impl NasClientApp {
                     }
                 }
             }
-            
+
             // If anything fails, safely send the failure message without panicking
             let _ = tx.send(AppMsg::ImageFailed(filename));
             ctx_clone.request_repaint();
@@ -1544,7 +1646,7 @@ fn parse_hex(hex: &str, fallback: egui::Color32) -> egui::Color32 {
 fn load_theme(available_themes: &HashMap<String, AppTheme>) -> (String, AppTheme) {
     // 1. Define your default fallback name and hardcoded colors
     let mut active_theme_name = String::from("Defaultio (Ugly Purple)");
-    
+
     let mut theme = AppTheme {
         background: egui::Color32::from_hex("#250444").unwrap(),
         text_primary: egui::Color32::BLACK,
@@ -1588,7 +1690,7 @@ fn load_theme(available_themes: &HashMap<String, AppTheme>) -> (String, AppTheme
                            folder_btn = #ac5ddc\n\
                            theme_btn = #ac5ddc";
         let _ = std::fs::write(STYLE_FILE, default_ini);
-        return (active_theme_name, theme); 
+        return (active_theme_name, theme);
     }
 
     // 2. Read the file to find the active theme name first
@@ -1610,8 +1712,11 @@ fn load_theme(available_themes: &HashMap<String, AppTheme>) -> (String, AppTheme
         // 4. Read the file again to apply any manual custom color overrides
         for line in content.lines() {
             let line_clean = line.trim();
-            if line_clean.starts_with('#') || line_clean.starts_with('[') || line_clean.to_lowercase().starts_with("active_theme") {
-                continue; 
+            if line_clean.starts_with('#')
+                || line_clean.starts_with('[')
+                || line_clean.to_lowercase().starts_with("active_theme")
+            {
+                continue;
             }
 
             let parts: Vec<&str> = line_clean.split('=').collect();
@@ -1622,7 +1727,9 @@ fn load_theme(available_themes: &HashMap<String, AppTheme>) -> (String, AppTheme
                 match key.as_str() {
                     "background" => theme.background = parse_hex(hex_val, theme.background),
                     "text_primary" => theme.text_primary = parse_hex(hex_val, theme.text_primary),
-                    "text_dashboard" => theme.text_dashboard = parse_hex(hex_val, theme.text_dashboard),
+                    "text_dashboard" => {
+                        theme.text_dashboard = parse_hex(hex_val, theme.text_dashboard)
+                    }
                     "text_title" => theme.text_title = parse_hex(hex_val, theme.text_title),
                     "list_txt" => theme.list_txt = parse_hex(hex_val, theme.list_txt),
                     "download_btn" => theme.download_btn = parse_hex(hex_val, theme.download_btn),
@@ -1636,7 +1743,7 @@ fn load_theme(available_themes: &HashMap<String, AppTheme>) -> (String, AppTheme
                     "path_btn" => theme.path_btn = parse_hex(hex_val, theme.path_btn),
                     "folder_btn" => theme.folder_btn = parse_hex(hex_val, theme.folder_btn),
                     "theme_btn" => theme.theme_btn = parse_hex(hex_val, theme.theme_btn),
-                    _ => {} 
+                    _ => {}
                 }
             }
         }
@@ -1647,7 +1754,7 @@ fn load_theme(available_themes: &HashMap<String, AppTheme>) -> (String, AppTheme
 
 fn load_theme_templates() -> HashMap<String, AppTheme> {
     let mut themes = HashMap::new();
-    
+
     // Read the file. If it doesn't exist, return an empty map.
     let content = match std::fs::read_to_string("StyleTemplates.txt") {
         Ok(c) => c,
@@ -1659,7 +1766,9 @@ fn load_theme_templates() -> HashMap<String, AppTheme> {
 
     for line in content.lines() {
         let line = line.trim();
-        if line.is_empty() || line.starts_with('[') { continue; }
+        if line.is_empty() || line.starts_with('[') {
+            continue;
+        }
 
         // Detect a new theme name (e.g., "PinkPig:")
         if line.ends_with(':') {
@@ -1668,24 +1777,34 @@ fn load_theme_templates() -> HashMap<String, AppTheme> {
             }
             current_name = line.trim_end_matches(':').trim().to_string();
             current_theme = AppTheme::default(); // Reset for the new theme
-        } 
+        }
         // Parse the key-value color pairs
         else if let Some((key, val)) = line.split_once('=') {
             let hex = val.trim();
             match key.trim().to_lowercase().as_str() {
                 "background" => current_theme.background = parse_hex(hex, current_theme.background),
-                "text_primary" => current_theme.text_primary = parse_hex(hex, current_theme.text_primary),
-                "text_dashboard" => current_theme.text_dashboard = parse_hex(hex, current_theme.text_dashboard),
+                "text_primary" => {
+                    current_theme.text_primary = parse_hex(hex, current_theme.text_primary)
+                }
+                "text_dashboard" => {
+                    current_theme.text_dashboard = parse_hex(hex, current_theme.text_dashboard)
+                }
                 "text_title" => current_theme.text_title = parse_hex(hex, current_theme.text_title),
                 "list_txt" => current_theme.list_txt = parse_hex(hex, current_theme.list_txt),
-                "download_btn" => current_theme.download_btn = parse_hex(hex, current_theme.download_btn),
+                "download_btn" => {
+                    current_theme.download_btn = parse_hex(hex, current_theme.download_btn)
+                }
                 "upload_btn" => current_theme.upload_btn = parse_hex(hex, current_theme.upload_btn),
                 "delete_btn" => current_theme.delete_btn = parse_hex(hex, current_theme.delete_btn),
                 "move_btn" => current_theme.move_btn = parse_hex(hex, current_theme.move_btn),
                 "logout_btn" => current_theme.logout_btn = parse_hex(hex, current_theme.logout_btn),
-                "connect_btn" => current_theme.connect_btn = parse_hex(hex, current_theme.connect_btn),
+                "connect_btn" => {
+                    current_theme.connect_btn = parse_hex(hex, current_theme.connect_btn)
+                }
                 "open_btn" => current_theme.open_btn = parse_hex(hex, current_theme.open_btn),
-                "refresh_btn" => current_theme.refresh_btn = parse_hex(hex, current_theme.refresh_btn),
+                "refresh_btn" => {
+                    current_theme.refresh_btn = parse_hex(hex, current_theme.refresh_btn)
+                }
                 "path_btn" => current_theme.path_btn = parse_hex(hex, current_theme.path_btn),
                 "folder_btn" => current_theme.folder_btn = parse_hex(hex, current_theme.folder_btn),
                 "theme_btn" => current_theme.theme_btn = parse_hex(hex, current_theme.theme_btn),
@@ -1693,12 +1812,12 @@ fn load_theme_templates() -> HashMap<String, AppTheme> {
             }
         }
     }
-    
+
     // Catch the final theme in the file
     if !current_name.is_empty() {
         themes.insert(current_name, current_theme);
     }
-    
+
     themes
 }
 
@@ -1754,8 +1873,34 @@ fn save_theme(theme_name: &str, theme: &AppTheme) {
         color_to_hex(theme.folder_btn),
         color_to_hex(theme.theme_btn),
     );
-    
+
     let _ = std::fs::write(STYLE_FILE, ini_content);
+}
+fn save_protections(locked_items: &std::collections::HashSet<String>) {
+    use std::io::Write;
+    if let Ok(mut file) = std::fs::File::create(PROTECTIONS_FILE) {
+        let _ = writeln!(file, "[Protected Files]");
+        for item in locked_items {
+            let _ = writeln!(file, "{}", item);
+        }
+    }
+}
+
+// Reads the text file and returns a populated HashSet
+fn load_protections() -> std::collections::HashSet<String> {
+    let mut locked_items = std::collections::HashSet::new();
+
+    if let Ok(content) = std::fs::read_to_string(PROTECTIONS_FILE) {
+        for line in content.lines() {
+            let trimmed = line.trim();
+            // Skip empty lines and the section header
+            if !trimmed.is_empty() && !trimmed.starts_with('[') {
+                locked_items.insert(trimmed.to_string());
+            }
+        }
+    }
+
+    locked_items
 }
 
 // --- Main Entry ---
