@@ -738,18 +738,14 @@ impl NasClientApp {
                                 .size(24.0);
                             let folder_open_button =
                                 egui::Button::new(folder_open_button_raw).fill(self.theme.open_btn);
-                            let folder_move_button_raw = egui::RichText::new("Move")
-                                .color(self.theme.text_primary)
-                                .size(24.0);
-                            let folder_move_button =
-                                egui::Button::new(folder_move_button_raw).fill(self.theme.move_btn);
+
                             //new item to raise the lock flag
                             //
                             //
                             if !is_locked {
                                 let folder_delete_button_raw = egui::RichText::new("🗑 delete")
                                     .color(self.theme.text_primary)
-                                    .size(24.0);
+                                    .size(12.0);
                                 let folder_delete_button =
                                     egui::Button::new(folder_delete_button_raw)
                                         .fill(self.theme.delete_btn);
@@ -788,9 +784,16 @@ impl NasClientApp {
                             }
 
                             ui.add_space(5.0);
+                            if !is_locked {
+                                let folder_move_button_raw = egui::RichText::new("Move")
+                                    .color(self.theme.text_primary)
+                                    .size(24.0);
+                                let folder_move_button = egui::Button::new(folder_move_button_raw)
+                                    .fill(self.theme.move_btn);
 
-                            if ui.add(folder_move_button).clicked() {
-                                self.moving_item = Some(file.name.clone());
+                                if ui.add(folder_move_button).clicked() {
+                                    self.moving_item = Some(file.name.clone());
+                                }
                             }
                             let lock_text = if is_locked {
                                 "🔓 Unlock"
@@ -880,17 +883,6 @@ impl NasClientApp {
                         ui.label(format!("({:.2} MB)", mb));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let is_locked = self.locked_items.contains(&file.name); //new thing
-                            // let file_delete_button_raw = egui::RichText::new("🗑 delete")
-                            //     .color(self.theme.text_primary)
-                            //     .size(15.0);
-                            // let file_delete_button = egui::Button::new(file_delete_button_raw)
-                            //     .fill(self.theme.delete_btn);
-
-                            let file_move_raw = egui::RichText::new("Move")
-                                .color(self.theme.text_primary)
-                                .size(24.0);
-                            let file_move_button =
-                                egui::Button::new(file_move_raw).fill(self.theme.move_btn);
 
                             let file_download_raw = egui::RichText::new("⬇ Download")
                                 .color(self.theme.text_primary)
@@ -903,7 +895,7 @@ impl NasClientApp {
                             if !is_locked {
                                 let folder_delete_button_raw = egui::RichText::new("🗑 delete")
                                     .color(self.theme.text_primary)
-                                    .size(15.0);
+                                    .size(12.0);
                                 let folder_delete_button =
                                     egui::Button::new(folder_delete_button_raw)
                                         .fill(self.theme.delete_btn);
@@ -939,9 +931,17 @@ impl NasClientApp {
                                 }
                             }
                             // For Files:
-                            if ui.add(file_move_button).clicked() {
-                                self.moving_item = Some(file.name.clone());
+                            if !is_locked {
+                                let file_move_raw = egui::RichText::new("Move")
+                                    .color(self.theme.text_primary)
+                                    .size(24.0);
+                                let file_move_button =
+                                    egui::Button::new(file_move_raw).fill(self.theme.move_btn);
+                                if ui.add(file_move_button).clicked() {
+                                    self.moving_item = Some(file.name.clone());
+                                }
                             }
+
                             let lock_text = if is_locked {
                                 "🔓 Unlock"
                             } else {
