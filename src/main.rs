@@ -151,6 +151,7 @@ struct NasClientApp {
     tray_listener_spawned: bool,
     is_hidden: bool,
     locked_items: std::collections::HashSet<String>,
+    show_batch_move_modal: bool,
 }
 /// - Give Default values to the app to prevent bugs.
 /// - Each new value for the NasClientApp struct needs a default!
@@ -215,6 +216,7 @@ impl Default for NasClientApp {
             tray_listener_spawned: false,
             is_hidden: false,
             locked_items: load_protections(),
+            show_batch_move_modal: false,
         }
     }
 }
@@ -286,18 +288,16 @@ impl eframe::App for NasClientApp {
             });
         }
 
-        // ==========================================
         // 2. INTERCEPT THE CLOSE BUTTON (THE FIX)
-        // ==========================================
+
         #[cfg(not(target_os = "linux"))]
         if ctx.input(|i| i.viewport().close_requested()) {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
         }
-        //}
-        // ==========================================
+
         // 3. PROCESS BACKGROUND MESSAGES
-        // ==========================================
+
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
                 AppMsg::LoginSuccess(token) => {
@@ -692,7 +692,6 @@ impl NasClientApp {
                     egui::RichText::new(format!("{} files selected", self.selected_files.len()))
                         .strong(),
                 );
-
                 if ui.button("⬇ Download All").clicked() {
                     // Ask the user for a FOLDER, not a file!
                     if let Some(save_folder) = rfd::FileDialog::new().pick_folder() {
@@ -706,6 +705,10 @@ impl NasClientApp {
                         // Clear the checkboxes immediately so the UI resets
                         self.selected_files.clear();
                     }
+                }
+
+                if ui.button("📁 Move Selected").clicked() {
+                    self.show_batch_move_modal = true;
                 }
 
                 if ui.button("Clear Selection").clicked() {
@@ -827,12 +830,15 @@ impl NasClientApp {
                             }
                         });
                     } else {
+                        let is_locked = self.locked_items.contains(&file.name); //new thing
                         let mut is_selected = self.selected_files.contains(&file.name);
-                        if ui.checkbox(&mut is_selected, "").clicked() {
-                            if is_selected {
-                                self.selected_files.insert(file.name.clone());
-                            } else {
-                                self.selected_files.remove(&file.name);
+                        if !is_locked {
+                            if ui.checkbox(&mut is_selected, "").clicked() {
+                                if is_selected {
+                                    self.selected_files.insert(file.name.clone());
+                                } else {
+                                    self.selected_files.remove(&file.name);
+                                }
                             }
                         }
                         //get a preview of the pic
@@ -1127,7 +1133,101 @@ impl NasClientApp {
                 self.show_config_modal = false;
             }
         }
-    }
+        if self.show_batch_move_modal {
+            egui::Window::new("Move Selected Items")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ui.ctx(), |ui| {
+                    ui.label(format!("Moving {} items", self.selected_files.len()));
+                    ui.add_space(10.0);
+
+                    ui.label("Select destination:");
+
+                    // Use a unique ID source so it doesn't clash with the single-move dropdown
+                    egui::ComboBox::from_id_source("batch_move_dropdown")
+                        .selected_text(if self.move_target_folder.is_empty() {
+                            "Root (/)".to_string()
+                        } else {
+                            format!("/{}", self.move_target_folder)
+                        })
+                        .width(250.0)
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut self.move_target_folder,
+                                String::new(),
+                                "Root (/)",
+                            );
+
+                            if !self.current_path.is_empty() {
+                                let mut parts: Vec<&str> = self.current_path.split('/').collect();
+                                parts.pop();
+                                let parent_path = parts.join("/");
+
+                                let display_name = if parent_path.is_empty() {
+                                    "Root (/)".to_string()
+                                } else {
+                                    format!("/{}", parent_path)
+                                };
+
+                                ui.selectable_value(
+                                    &mut self.move_target_folder,
+                                    parent_path,
+                                    format!("⬆ Parent ({})", display_name),
+                                );
+                            }
+
+                            for f in &self.files {
+                                // Prevent moving selected folders inside themselves!
+                                if f.is_dir && !self.selected_files.contains(&f.name) {
+                                    let target_path = if self.current_path.is_empty() {
+                                        f.name.clone()
+                                    } else {
+                                        format!("{}/{}", self.current_path, f.name)
+                                    };
+                                    ui.selectable_value(
+                                        &mut self.move_target_folder,
+                                        target_path.clone(),
+                                        format!("📁 /{}", target_path),
+                                    );
+                                }
+                            }
+                        });
+
+                    ui.add_space(15.0);
+
+                    ui.horizontal(|ui| {
+                        if ui.button("Confirm Move").clicked() {
+                            // Iterate through the HashSet and fire a move request for each file
+                            for item_name in self.selected_files.clone() {
+                                let source = if self.current_path.is_empty() {
+                                    item_name.clone()
+                                } else {
+                                    format!("{}/{}", self.current_path, item_name)
+                                };
+
+                                self.move_item(
+                                    source,
+                                    self.move_target_folder.clone(),
+                                    item_name,
+                                    ctx,
+                                );
+                            }
+
+                            // Reset state and close modal
+                            self.show_batch_move_modal = false;
+                            self.move_target_folder.clear();
+                            self.selected_files.clear();
+                        }
+
+                        if ui.button("Cancel").clicked() {
+                            self.show_batch_move_modal = false;
+                            self.move_target_folder.clear();
+                        }
+                    });
+                });
+        }
+    } //end of "render dashboard"
 
     // This is where all of the network functions are called.
     //-----------------------------------------------------------------------------

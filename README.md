@@ -9,7 +9,7 @@
 - Customizable UI
 - Easy Dashboard Management
 - Multi-upload / Download
-- Improved User Control
+- Improved User Control (Deleting files/folders, moving files around)
 - Come on, it's better in every way.
 
 --- 
@@ -87,7 +87,17 @@ sudo apt update && sudo apt install libx11-dev libxcursor-dev libxrandr-dev libx
 
 #### Read this!:
 
-**The app will *NOT* close upon pressing the close button. You must either kill the process or use the system tray icon to close it.**
+**The app will *NOT* close upon pressing the close button. You must either kill the process or use the system tray icon to close it.** [ as of 11/10/2026, now a windows only feature.]
 
 This change prevents the app from closing, obviously, since I personally do it out of habit.
 The app should stay open. It uses only about 80MB of RAM (on windows) without any images loaded.
+
+### New Features! (Fall, 2026)
+---
+- [x] Added a lock feature, no more moving or deleting files, if you lock them. This is great for directory folders, or other important folders.
+- [x] Added a multi-move feature, now multiple files can be downloaded or moved to a different location.
+(Tip: store files into a dozen files into a temporary directory, move the directory wherever you want, and then multi-move the files into the directory and delete the temoporary folder)
+- [x] Made the app beyond pretty
+- [x] sooo many fixes.
+- [x] reduced file size
+- [x] improved tray icon - windows only
