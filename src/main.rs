@@ -147,7 +147,7 @@ struct NasClientApp {
     show_config_modal: bool,
     active_config: Option<AppConfig>,
 
-    tray_icon: Option<TrayIcon>, // figure out how to kill this warning.
+    _tray_icon: Option<TrayIcon>, // warning is killed by the underscore. Good job team.
     tray_listener_spawned: bool,
     is_hidden: bool,
     locked_items: std::collections::HashSet<String>,
@@ -211,7 +211,7 @@ impl Default for NasClientApp {
             selected_files: HashSet::new(),
             show_config_modal: false,
             active_config: None,
-            tray_icon: Some(tray_icon_instance),
+            _tray_icon: Some(tray_icon_instance),
             tray_listener_spawned: false,
             is_hidden: false,
             locked_items: load_protections(),
@@ -289,11 +289,12 @@ impl eframe::App for NasClientApp {
         // ==========================================
         // 2. INTERCEPT THE CLOSE BUTTON (THE FIX)
         // ==========================================
+        #[cfg(not(target_os = "linux"))]
         if ctx.input(|i| i.viewport().close_requested()) {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
         }
-
+        //}
         // ==========================================
         // 3. PROCESS BACKGROUND MESSAGES
         // ==========================================
@@ -575,6 +576,7 @@ impl NasClientApp {
             //the upload button is first.
             if ui.add(upload_button).clicked() {
                 if let Some(path) = rfd::FileDialog::new().pick_files() {
+                    //this causes the crash
                     self.upload_files(path, ctx);
                 }
             }
