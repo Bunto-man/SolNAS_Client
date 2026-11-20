@@ -2017,9 +2017,10 @@ fn main() {
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1000.0, 900.0])
+            .with_inner_size([1000.0, 800.0])
             .with_title("SolNAS Client")
-            .with_transparent(true), //allow transparency
+            .with_transparent(true)
+            .with_resizable(false), //allow transparency
         ..Default::default()
     };
 
