@@ -884,11 +884,14 @@ impl NasClientApp {
                         }
                         //get a preview of the pic
                         let lower_name = file.name.to_lowercase();
-                        let is_image = lower_name.ends_with(".png")
-                            || lower_name.ends_with(".jpg")
-                            || lower_name.ends_with(".jpeg");
+                        let is_previewable = [
+                            ".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4", ".mov", ".mkv",
+                            ".avi", ".webm",
+                        ]
+                        .iter()
+                        .any(|ext| lower_name.ends_with(ext));
 
-                        if is_image {
+                        if is_previewable {
                             // Check our cache
                             match self.image_cache.get(&file.name) {
                                 Some(ImageState::Loaded(texture)) => {
