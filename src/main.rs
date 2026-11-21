@@ -38,6 +38,16 @@ struct FileInfo {
     name: String,
     size: u64,
     is_dir: bool,
+    #[serde(default)]
+    modified: u64, // Unix timestamp from the host
+}
+
+#[derive(PartialEq, Clone, Copy)]
+enum SortMode {
+    NameAsc,
+    NewestFirst,
+    OldestFirst,
+    SizeDesc,
 }
 
 #[derive(Deserialize)]
@@ -152,6 +162,8 @@ struct NasClientApp {
     is_hidden: bool,
     locked_items: std::collections::HashSet<String>,
     show_batch_move_modal: bool,
+
+    sort_mode: SortMode,
 }
 /// - Give Default values to the app to prevent bugs.
 /// - Each new value for the NasClientApp struct needs a default!
@@ -217,6 +229,7 @@ impl Default for NasClientApp {
             is_hidden: false,
             locked_items: load_protections(),
             show_batch_move_modal: false,
+            sort_mode: SortMode::NameAsc,
         }
     }
 }
@@ -314,6 +327,7 @@ impl eframe::App for NasClientApp {
                 AppMsg::FilesLoaded(file_list) => {
                     self.is_loading = false;
                     self.files = file_list;
+                    self.sort_files();
                 }
                 AppMsg::ActionSuccess(msg) => {
                     self.is_loading = false;
@@ -561,6 +575,33 @@ impl NasClientApp {
                     .strong()
                     .color(self.theme.list_txt),
             );
+            let old_mode = self.sort_mode;
+            ui.label("Sort By: ");
+            egui::ComboBox::from_id_source("sort_mode_dropdown")
+                .selected_text(match self.sort_mode {
+                    SortMode::NameAsc => "Name (A–Z)",
+                    SortMode::NewestFirst => "Upload Time (Newest)",
+                    SortMode::OldestFirst => "Upload Time (Oldest)",
+                    SortMode::SizeDesc => "Size (Largest)",
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut self.sort_mode,
+                        SortMode::NewestFirst,
+                        "Upload Time (Newest)",
+                    );
+                    ui.selectable_value(
+                        &mut self.sort_mode,
+                        SortMode::OldestFirst,
+                        "Upload Time (Oldest)",
+                    );
+                    ui.selectable_value(&mut self.sort_mode, SortMode::NameAsc, "Name (A–Z)");
+                    ui.selectable_value(&mut self.sort_mode, SortMode::SizeDesc, "Size (Largest)");
+                });
+
+            if self.sort_mode != old_mode {
+                self.sort_files();
+            }
             //refresh button is last of the top.
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.add(refresh_button).clicked() {
@@ -1514,7 +1555,18 @@ impl NasClientApp {
             ctx_clone.request_repaint();
         });
     }
-
+    fn sort_files(&mut self) {
+        let mode = self.sort_mode;
+        self.files.sort_by(|a, b| {
+            // Always keep folders above files
+            b.is_dir.cmp(&a.is_dir).then_with(|| match mode {
+                SortMode::NameAsc => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+                SortMode::NewestFirst => b.modified.cmp(&a.modified),
+                SortMode::OldestFirst => a.modified.cmp(&b.modified),
+                SortMode::SizeDesc => b.size.cmp(&a.size),
+            })
+        });
+    }
     fn move_item(
         &mut self,
         source_path: String,
