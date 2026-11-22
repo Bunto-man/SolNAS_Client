@@ -883,6 +883,7 @@ impl NasClientApp {
                             }
                         }
                         //get a preview of the pic
+                        // put the name of the file to lowercase to check for common file extensions
                         let lower_name = file.name.to_lowercase();
                         let is_previewable = [
                             ".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4", ".mov", ".mkv",
@@ -890,7 +891,24 @@ impl NasClientApp {
                         ]
                         .iter()
                         .any(|ext| lower_name.ends_with(ext));
-
+                        //check for a zip file.
+                        let is_zip = [".zip", ".rar", ".7z", ".tar", ".gz", ".tgz"]
+                            .iter()
+                            .any(|ext| lower_name.ends_with(ext));
+                        //check for common text based files.
+                        let is_text = [
+                            ".txt", ".text", ".asc", ".md", ".rtf", ".docx", ".odt", ".pages",
+                            ".tex", ".pdf", ".csv",
+                        ]
+                        .iter()
+                        .any(|ext| lower_name.ends_with(ext));
+                        let is_code = [
+                            ".json", ".ini", ".dll", ".cfg", ".conf", ".c", ".rs", ".cpp", ".go",
+                            ".cc", ".cxx", ".zig", ".js", ".py", ".lua", ".cmd", ".ps1", ".java",
+                            ".class", ".cs", ".exe", ".dylib", ".html", ".m",
+                        ]
+                        .iter()
+                        .any(|ext| lower_name.ends_with(ext));
                         if is_previewable {
                             // Check our cache
                             match self.image_cache.get(&file.name) {
@@ -907,7 +925,7 @@ impl NasClientApp {
                                     ui.spinner(); // Show a loading wheel while it downloads
                                 }
                                 Some(ImageState::Failed) => {
-                                    ui.label("📄"); // Fallback to emoji if it broke
+                                    ui.label("🖼️"); // Fallback to emoji if it broke
                                 }
                                 None => {
                                     // We haven't asked for this image yet! Queue it up and show a spinner for now.
@@ -915,8 +933,26 @@ impl NasClientApp {
                                     ui.spinner();
                                 }
                             }
+                        } else if is_zip {
+                            ui.label(
+                                egui::RichText::new("📦")
+                                    .font(egui::FontId::proportional(24.0))
+                                    .color(self.theme.list_txt),
+                            );
+                        } else if is_text {
+                            ui.label(
+                                egui::RichText::new("📝")
+                                    .font(egui::FontId::proportional(24.0))
+                                    .color(self.theme.list_txt),
+                            );
+                        } else if is_code {
+                            ui.label(
+                                egui::RichText::new("</>")
+                                    .font(egui::FontId::proportional(24.0))
+                                    .color(self.theme.list_txt),
+                            );
                         } else {
-                            // Standard file icon for PDFs, TXTs, etc.
+                            // Standard file icon BOORINGG
                             ui.label(
                                 egui::RichText::new("📄")
                                     .font(egui::FontId::proportional(24.0))
