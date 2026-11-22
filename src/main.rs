@@ -458,7 +458,8 @@ impl NasClientApp {
             );
 
             ui.add(
-                egui::TextEdit::singleline(&mut self.password_input) // change the size of the text bar
+                egui::TextEdit::singleline(&mut self.password_input)
+                    .password(true) // change the size of the text bar
                     .font(egui::FontId::proportional(24.0)),
             );
         });
