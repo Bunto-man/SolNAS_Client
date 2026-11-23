@@ -2,7 +2,7 @@ Here are some templates to use in the client!
 Simply copy paste them into the style.ini file after running the program.
 
 
-PinkPig: 
+PinkPig:
 
 [Colors]
 background = #fffff2
@@ -128,7 +128,7 @@ folder_btn = #eeeac771
 theme_btn = #eeeac771
 
 
-Truly Glass: 
+Truly Glass:
 
 [Colors]
 background = #faf9f510
@@ -252,3 +252,65 @@ refresh_btn = #b31313
 path_btn = #c96e07
 folder_btn = #b31313
 theme_btn = #ff0241
+
+
+Mono Shade:
+
+[Colors]
+background = #6b6a6a
+Text_Primary = #0c0c0c
+Text_dashboard = #0c0c0c
+text_title =     #c7f8f8
+list_txt =        #0c0c0c
+download_btn = #c9c7c7
+upload_btn = #c9c7c7
+delete_btn = #ffffff
+move_btn = #c9c7c7
+logout_btn = #c9c7c7
+connect_btn = #c9c7c7
+open_btn = #5c5a5a
+refresh_btn = #c9c7c7
+path_btn = #c9c7c7
+folder_btn = #c9c7c7
+theme_btn = #c3c9dd
+
+
+Dark Mode:
+
+[Colors]
+background = #292928
+Text_Primary = #cfcccc
+Text_dashboard = #cfcccc
+text_title =     #cfcccc
+list_txt =        #cfcccc
+download_btn = #44587e
+upload_btn = #44587e
+delete_btn = #7e4444
+move_btn = #447e49
+logout_btn = #44587e
+connect_btn = #44587e
+open_btn = #7e7d44
+refresh_btn = #44587e
+path_btn = #44587e
+folder_btn = #44587e
+theme_btn = #639aff
+
+Nightmare:
+
+[Colors]
+background = #211d26
+Text_Primary = #cfcccc
+Text_dashboard = #cfcccc
+text_title =     #cfcccc
+list_txt =        #cfcccc
+download_btn = #7500d7
+upload_btn = #8b00ff
+delete_btn = #2c0050
+move_btn = #9f31fb
+logout_btn = #8b00ff
+connect_btn = #8b00ff
+open_btn = #7500d7
+refresh_btn = #8b00ff
+path_btn = #8b00ff
+folder_btn = #8b00ff
+theme_btn = #8b00ff
