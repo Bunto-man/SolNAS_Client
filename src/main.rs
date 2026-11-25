@@ -5,7 +5,8 @@ use once_cell::sync::Lazy;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
+    path::PathBuf,
     sync::mpsc::{self, Receiver, Sender},
 };
 use tray_icon::TrayIcon;
@@ -30,6 +31,11 @@ struct AppConfig {
 #[derive(Deserialize)]
 struct AuthResponse {
     token: Option<String>,
+}
+
+pub struct QueuedUpload {
+    pub file_path: PathBuf,
+    pub target_folder: String,
 }
 
 #[derive(Deserialize, Clone)]
@@ -94,6 +100,8 @@ enum AppMsg {
     ConfigSaved,
     RestoreWindow,
     SessionExpired, // New as of 7/30/2026
+    SingleUploadFinished(String),
+    SingleUploadFailed(String),
 }
 enum ImageState {
     Loading,
@@ -163,6 +171,9 @@ struct NasClientApp {
     show_batch_move_modal: bool,
 
     sort_mode: SortMode,
+
+    upload_queue: VecDeque<QueuedUpload>,
+    is_uploading: bool,
 }
 /// - Give Default values to the app to prevent bugs.
 /// - Each new value for the NasClientApp struct needs a default!
@@ -229,6 +240,8 @@ impl Default for NasClientApp {
             locked_items: network::load_protections(),
             show_batch_move_modal: false,
             sort_mode: SortMode::NameAsc,
+            upload_queue: VecDeque::new(),
+            is_uploading: false,
         }
     }
 }
@@ -380,6 +393,25 @@ impl eframe::App for NasClientApp {
                     self.view = ViewState::Login;
 
                     self.status_message = "Session expired. Please log in again.".into();
+                }
+                AppMsg::SingleUploadFinished(name) => {
+                    self.is_uploading = false;
+                    self.upload_progress = None;
+                    self.refresh_files(ctx);
+
+                    if self.upload_queue.is_empty() {
+                        self.status_message =
+                            format!("Finished uploading '{}'. All uploads complete!", name);
+                    } else {
+                        self.process_next_upload(ctx);
+                    }
+                }
+                AppMsg::SingleUploadFailed(err) => {
+                    self.is_uploading = false;
+                    self.upload_progress = None;
+                    self.status_message = err;
+                    // Move on to the next queued file instead of stalling the whole buffer
+                    self.process_next_upload(ctx);
                 }
             }
         }

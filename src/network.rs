@@ -1,9 +1,9 @@
 use crate::{
     AppConfig, AppMsg, AppTheme, CONFIG_FILE, HTTP_CLIENT, HashMap, ImageState, ListResponse,
-    MoveRequest, NasClientApp, PROTECTIONS_FILE, STYLE_FILE, SortMode,
+    MoveRequest, NasClientApp, PROTECTIONS_FILE, QueuedUpload, STYLE_FILE, SortMode,
 };
 use eframe::egui;
-use std::{io::Read, path::PathBuf, thread};
+use std::{path::PathBuf, thread};
 
 impl NasClientApp {
     // This is where all of the network functions are called.
@@ -58,105 +58,141 @@ impl NasClientApp {
     }
 
     pub fn upload_files(&mut self, file_paths: Vec<PathBuf>, ctx: &egui::Context) {
-        self.is_loading = true;
+        for file_path in file_paths {
+            self.upload_queue.push_back(QueuedUpload {
+                file_path,
+                target_folder: self.current_path.clone(),
+            });
+        }
+
+        // Start immediately if idle; otherwise, the active upload will pick it up next
+        self.process_next_upload(ctx);
+    }
+
+    pub fn process_next_upload(&mut self, ctx: &egui::Context) {
+        if self.is_uploading {
+            return;
+        }
+
+        let Some(job) = self.upload_queue.pop_front() else {
+            self.upload_progress = None;
+            return;
+        };
+
+        self.is_uploading = true;
         self.upload_progress = Some(0.0);
-        self.status_message = format!("Uploading {} file(s)...", file_paths.len());
+
+        let filename = job
+            .file_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+
+        let remaining = self.upload_queue.len();
+        self.status_message = if remaining > 0 {
+            format!("Uploading '{}' ({} more in queue)...", filename, remaining)
+        } else {
+            format!("Uploading '{}'...", filename)
+        };
 
         let tx = self.tx.clone();
         let ctx_clone = ctx.clone();
         let ip = self.ip_input.clone();
         let token = self.token.clone();
-        let current_path = self.current_path.clone();
 
-        thread::spawn(move || {
+        std::thread::spawn(move || {
             let client = HTTP_CLIENT.clone();
             let url = format!("https://{}:8080/api/upload_chunk", ip);
 
-            for file_path in file_paths {
-                let filename = file_path.file_name().unwrap().to_str().unwrap().to_string();
-                let target_name = if current_path.is_empty() {
-                    filename
-                } else {
-                    format!("{}/{}", current_path, filename)
-                };
+            let target_name = if job.target_folder.is_empty() {
+                filename.clone()
+            } else {
+                format!("{}/{}", job.target_folder, filename)
+            };
 
-                let mut file = match std::fs::File::open(&file_path) {
-                    Ok(f) => f,
-                    Err(e) => {
-                        let _ = tx.send(AppMsg::Error(format!("Could not read local file: {}", e)));
-                        continue;
-                    }
-                };
+            let mut file = match std::fs::File::open(&job.file_path) {
+                Ok(f) => f,
+                Err(e) => {
+                    let _ = tx.send(AppMsg::SingleUploadFailed(format!(
+                        "Could not read '{}': {}",
+                        filename, e
+                    )));
+                    ctx_clone.request_repaint();
+                    return;
+                }
+            };
 
-                let file_size = file.metadata().unwrap().len();
+            let file_size = file.metadata().map(|m| m.len()).unwrap_or(0);
+            let chunk_size: u64 = if file_size <= 50 * 1024 * 1024 {
+                file_size
+            } else if file_size <= 1024 * 1024 * 1024 {
+                25 * 1024 * 1024
+            } else {
+                100 * 1024 * 1024
+            };
 
-                const CHUNK_SIZE: u64 = 100 * 1024 * 1024; // 100 Megabytes per chunk
+            let total_chunks = if file_size == 0 {
+                1
+            } else {
+                (file_size as f64 / chunk_size as f64).ceil() as u64
+            };
 
-                //the edge case: Uploading a completely empty file (0 bytes)
-                let total_chunks = if file_size == 0 {
-                    1
-                } else {
-                    (file_size as f64 / CHUNK_SIZE as f64).ceil() as u64
-                };
+            for chunk_index in 0..total_chunks {
+                let current_chunk_size =
+                    std::cmp::min(chunk_size, file_size - (chunk_index * chunk_size));
+                let offset = chunk_index * chunk_size;
+                let mut buffer = vec![0; current_chunk_size as usize];
 
-                for chunk_index in 0..total_chunks {
-                    // Determine how big this specific chunk should be (the last chunk is usually smaller than 10MB)
-                    let current_chunk_size =
-                        std::cmp::min(CHUNK_SIZE, file_size - (chunk_index * CHUNK_SIZE));
-                    let offset = chunk_index * CHUNK_SIZE;
+                if let Err(e) = std::io::Read::read_exact(&mut file, &mut buffer) {
+                    let _ = tx.send(AppMsg::SingleUploadFailed(format!(
+                        "Failed reading '{}': {}",
+                        filename, e
+                    )));
+                    ctx_clone.request_repaint();
+                    return;
+                }
 
-                    let mut buffer = vec![0; current_chunk_size as usize];
+                let mut attempts = 0;
+                let mut success = false;
 
-                    if let Err(e) = file.read_exact(&mut buffer) {
-                        let _ =
-                            tx.send(AppMsg::Error(format!("Failed to read local chunk: {}", e)));
-                        break;
-                    }
+                while attempts < 3 && !success {
+                    let part = reqwest::blocking::multipart::Part::bytes(buffer.clone())
+                        .file_name(target_name.clone());
 
-                    // RETRY LOOP: Try to send the chunk up to 3 times if the network drops
-                    let mut attempts = 0;
-                    let mut success = false;
+                    let form = reqwest::blocking::multipart::Form::new()
+                        .text("filename", target_name.clone())
+                        .text("chunk_index", chunk_index.to_string())
+                        .text("total_chunks", total_chunks.to_string())
+                        .text("offset", offset.to_string())
+                        .part("file", part);
 
-                    while attempts < 3 && !success {
-                        // We must rebuild the form for every attempt because reqwest consumes it
-                        let part = reqwest::blocking::multipart::Part::bytes(buffer.clone())
-                            .file_name(target_name.clone());
-
-                        let form = reqwest::blocking::multipart::Form::new()
-                            .text("filename", target_name.clone())
-                            .text("chunk_index", chunk_index.to_string())
-                            .text("total_chunks", total_chunks.to_string())
-                            .text("offset", offset.to_string())
-                            .part("file", part);
-
-                        match client.post(&url).bearer_auth(&token).multipart(form).send() {
-                            Ok(res) if res.status().is_success() => success = true,
-                            _ => {
-                                attempts += 1;
-                                std::thread::sleep(std::time::Duration::from_secs(2)); // Wait 2s before retry
-                            }
+                    match client.post(&url).bearer_auth(&token).multipart(form).send() {
+                        Ok(res) if res.status().is_success() => success = true,
+                        _ => {
+                            attempts += 1;
+                            std::thread::sleep(std::time::Duration::from_secs(2));
                         }
                     }
-
-                    if !success {
-                        let _ = tx.send(AppMsg::Error(format!(
-                            "Upload failed after 3 retries: {}",
-                            target_name
-                        )));
-                        return; // Completely abort the thread
-                    }
-
-                    // Calculate total percentage and update UI!
-                    let percentage = (chunk_index as f32 + 1.0) / total_chunks as f32;
-                    let _ = tx.send(AppMsg::UploadProgress(percentage));
                 }
+
+                if !success {
+                    let _ = tx.send(AppMsg::SingleUploadFailed(format!(
+                        "Upload failed after 3 retries: {}",
+                        filename
+                    )));
+                    ctx_clone.request_repaint();
+                    return;
+                }
+
+                let pct = (chunk_index as f32 + 1.0) / total_chunks as f32;
+                let _ = tx.send(AppMsg::UploadProgress(pct));
+                ctx_clone.request_repaint();
             }
 
-            // All files finished!
-            let _ = tx.send(AppMsg::ActionSuccess("Upload complete!".into()));
+            let _ = tx.send(AppMsg::SingleUploadFinished(filename));
             ctx_clone.request_repaint();
         });
-        self.upload_progress = Some(0.0);
     }
 
     pub fn download_file(&mut self, filename: &str, save_path: PathBuf, ctx: &egui::Context) {

@@ -193,15 +193,22 @@ impl NasClientApp {
             });
         });
 
-        if let Some(progress) = self.upload_progress {
-            ui.add_space(5.0);
-
-            ui.add(
-                egui::ProgressBar::new(progress)
-                    .show_percentage()
-                    .animate(true),
-            );
-            ui.add_space(5.0);
+        if self.is_uploading || !self.upload_queue.is_empty() {
+            ui.horizontal(|ui| {
+                if let Some(progress) = self.upload_progress {
+                    ui.add(
+                        egui::ProgressBar::new(progress)
+                            .show_percentage()
+                            .animate(true),
+                    );
+                }
+                if !self.upload_queue.is_empty() {
+                    ui.label(format!("(+{} queued)", self.upload_queue.len()));
+                    if ui.button("Clear Queue").clicked() {
+                        self.upload_queue.clear();
+                    }
+                }
+            });
         }
         ui.separator();
 
