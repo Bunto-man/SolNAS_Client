@@ -570,50 +570,50 @@ pub fn parse_hex(hex: &str, fallback: egui::Color32) -> egui::Color32 {
 
 pub fn load_theme(available_themes: &HashMap<String, AppTheme>) -> (String, AppTheme) {
     // 1. Define your default fallback name and hardcoded colors
-    let mut active_theme_name = String::from("Defaultio (Ugly Purple)");
+    let mut active_theme_name = String::from("Nightmare");
 
     let mut theme = AppTheme {
-        background: egui::Color32::from_hex("#250444").unwrap(),
-        text_primary: egui::Color32::BLACK,
-        text_dashboard: egui::Color32::WHITE,
-        text_title: egui::Color32::from_hex("#FFFFFF").unwrap(),
-        list_txt: egui::Color32::from_hex("#000000").unwrap(),
-        download_btn: egui::Color32::from_hex("#28a792").unwrap(),
-        upload_btn: egui::Color32::from_hex("#ac5ddc").unwrap(),
-        delete_btn: egui::Color32::from_hex("#dc3545").unwrap(),
-        move_btn: egui::Color32::from_hex("#f07d12").unwrap(),
-        logout_btn: egui::Color32::from_hex("#ac5ddc").unwrap(),
-        connect_btn: egui::Color32::from_hex("#fcba00").unwrap(),
-        open_btn: egui::Color32::from_hex("#ac5ddc").unwrap(),
-        refresh_btn: egui::Color32::from_hex("#ac5ddc").unwrap(),
-        path_btn: egui::Color32::from_hex("#5ddcab").unwrap(),
-        folder_btn: egui::Color32::from_hex("#ac5ddc").unwrap(),
-        theme_btn: egui::Color32::from_hex("#ac5ddc").unwrap(),
+        background: egui::Color32::from_hex("#211d26").unwrap(),
+        text_primary: egui::Color32::from_hex("#cfcccc").unwrap(),
+        text_dashboard: egui::Color32::from_hex("#cfcccc").unwrap(),
+        text_title: egui::Color32::from_hex("#cfcccc").unwrap(),
+        list_txt: egui::Color32::from_hex("#cfcccc").unwrap(),
+        download_btn: egui::Color32::from_hex("#7500d7").unwrap(),
+        upload_btn: egui::Color32::from_hex("#8b00ff").unwrap(),
+        delete_btn: egui::Color32::from_hex("#2c0050").unwrap(),
+        move_btn: egui::Color32::from_hex("#9f31fb").unwrap(),
+        logout_btn: egui::Color32::from_hex("#8b00ff").unwrap(),
+        connect_btn: egui::Color32::from_hex("#8b00ff").unwrap(),
+        open_btn: egui::Color32::from_hex("#7500d7").unwrap(),
+        refresh_btn: egui::Color32::from_hex("#8b00ff").unwrap(),
+        path_btn: egui::Color32::from_hex("#8b00ff").unwrap(),
+        folder_btn: egui::Color32::from_hex("#8b00ff").unwrap(),
+        theme_btn: egui::Color32::from_hex("#8b00ff").unwrap(),
     };
 
     if !std::path::Path::new(STYLE_FILE).exists() {
         println!("Style file not found. Creating {}...", STYLE_FILE);
         // Write the new format with the Active_Theme setting at the top
         let default_ini = "[Settings]\n\
-                           Active_Theme = Defaultio (Ugly Purple)\n\
+                           Active_Theme = Nightmare\n\
                            \n\
                            [Colors]\n\
-                           background = #250444\n\
-                           Text_Primary = #000000\n\
-                           Text_dashboard = #FFFFFF\n\
-                           text_title =     #FFFFFF\n\
-                           list_txt =        #e6e4e7\n\
-                           download_btn = #28a792\n\
-                           upload_btn = #ac5ddc\n\
-                           delete_btn = #dc3545\n\
-                           move_btn = #f07d12\n\
-                           logout_btn = #ac5ddc\n\
-                           connect_btn = #fcba00\n\
-                           open_btn = #ac5ddc\n\
-                           refresh_btn = #ac5ddc\n\
-                           path_btn = #5ddcab\n\
-                           folder_btn = #ac5ddc\n\
-                           theme_btn = #ac5ddc";
+                           background = #211d26\n\
+                           Text_Primary = #cfcccc\n\
+                           Text_dashboard = #cfcccc\n\
+                           text_title =     #cfcccc\n\
+                           list_txt =        #cfcccc\n\
+                           download_btn = #7500d7\n\
+                           upload_btn = #8b00ff\n\
+                           delete_btn = #2c0050\n\
+                           move_btn = #9f31fb\n\
+                           logout_btn = #8b00ff\n\
+                           connect_btn = #8b00ff\n\
+                           open_btn = #7500d7\n\
+                           refresh_btn = #8b00ff\n\
+                           path_btn = #8b00ff\n\
+                           folder_btn = #8b00ff\n\
+                           theme_btn = #8b00ff";
         let _ = std::fs::write(STYLE_FILE, default_ini);
         return (active_theme_name, theme);
     }
