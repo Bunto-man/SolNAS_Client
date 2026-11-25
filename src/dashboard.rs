@@ -1,4 +1,7 @@
-use crate::{ImageState, NasClientApp, SortMode, ViewState, network};
+use crate::{
+    ImageState, NasClientApp, SortMode, ViewState,
+    network::{self, format_display_name},
+};
 use eframe::egui;
 use egui::Color32;
 
@@ -454,16 +457,30 @@ impl NasClientApp {
                                     .color(self.theme.list_txt),
                             );
                         }
-
+                        //the name of the file and how many letters will be included before cutting them.
+                        let display_name = format_display_name(&file.name, 20);
                         ui.label(
-                            egui::RichText::new(&file.name)
+                            egui::RichText::new(display_name)
                                 .strong()
                                 .font(egui::FontId::proportional(24.0))
+                                .color(self.theme.list_txt),
+                        )
+                        .on_hover_text(
+                            egui::RichText::new(&file.name)
+                                .font(egui::FontId::proportional(18.0))
                                 .color(self.theme.list_txt),
                         );
 
                         let mb = file.size as f64 / 1_048_576.0;
-                        ui.label(format!("({:.2} MB)", mb));
+                        if mb >= 1000.0 {
+                            let gb = mb / 1000.0;
+                            ui.label(format!("({:.2} GB)", gb));
+                        } else if mb < 1.0 {
+                            let kb = mb * 1000.0;
+                            ui.label(format!("({:.2} KB)", kb));
+                        } else {
+                            ui.label(format!("({:.2} MB)", mb));
+                        }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let is_locked = self.locked_items.contains(&file.name); //new thing
 

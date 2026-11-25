@@ -618,7 +618,7 @@ pub fn load_theme(available_themes: &HashMap<String, AppTheme>) -> (String, AppT
         return (active_theme_name, theme);
     }
 
-    // 2. Read the file to find the active theme name first
+    // Read the file to find the active theme name first
     if let Ok(content) = std::fs::read_to_string(STYLE_FILE) {
         for line in content.lines() {
             let line_clean = line.trim();
@@ -746,7 +746,7 @@ pub fn load_theme_templates() -> HashMap<String, AppTheme> {
     themes
 }
 
-// Put this helper function right above your save_theme function
+/// Put this helper function right above your save_theme function
 pub fn color_to_hex(c: egui::Color32) -> String {
     if c.a() == 255 {
         // Standard 6-character hex for solid colors
@@ -826,4 +826,23 @@ pub fn load_protections() -> std::collections::HashSet<String> {
     }
 
     locked_items
+}
+///Is only used in the dashboard file to fix when names are way too long.
+/// - Currently truncates to 20 letters and appends the type of file
+/// - ex: client_and_other....zip
+pub fn format_display_name(name: &str, max_len: usize) -> String {
+    let path = std::path::Path::new(name);
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or(name);
+    let ext = path.extension().and_then(|e| e.to_str());
+
+    if stem.chars().count() <= max_len {
+        return name.to_string();
+    }
+
+    let truncated: String = stem.chars().take(max_len).collect();
+
+    match ext {
+        Some(e) => format!("{}...{}", truncated, e),
+        None => format!("{}...", truncated),
+    }
 }
